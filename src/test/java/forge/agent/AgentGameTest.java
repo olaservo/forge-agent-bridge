@@ -238,7 +238,7 @@ public class AgentGameTest {
         return name != null && !name.isJsonNull() && !g.get("me").isJsonNull() && name.getAsString().equals(g.get("me").getAsString());
     }
 
-    private static boolean iHavePriority(final JsonObject g) {
+    static boolean iHavePriority(final JsonObject g) {
         final JsonElement players = g.get("players");
         if (players == null || !players.isJsonArray()) {
             return false;
@@ -293,7 +293,7 @@ public class AgentGameTest {
         boolean ok() throws Exception;
     }
 
-    private static void waitFor(final String what, final long timeoutMillis, final Check cond) throws Exception {
+    static void waitFor(final String what, final long timeoutMillis, final Check cond) throws Exception {
         final long deadline = System.currentTimeMillis() + timeoutMillis;
         while (!cond.ok()) {
             if (System.currentTimeMillis() > deadline) {
