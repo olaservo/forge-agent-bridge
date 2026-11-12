@@ -117,9 +117,13 @@ final class AgentGuiGame extends NetworkGuiGame {
     public <T> OrderResult<T> order(final String title, final String top, final int remainingObjectsMin, final int remainingObjectsMax,
             final List<T> sourceChoices, final List<T> destChoices, final CardView referenceCard, final boolean sideboardingMode,
             final boolean showRememberCheckbox) {
-        final List<T> ordered = pick("order", title + (top == null ? "" : " / " + top), sourceChoices,
-                sourceChoices.size(), sourceChoices.size(), null);
-        if (ordered.size() != sourceChoices.size()) {
+        // The host says how many may be left unchosen, -1 for any number. Scry asks this way for the cards to
+        // put on the bottom, so asking for all of them every time sent the whole scry to the bottom.
+        final int n = sourceChoices.size();
+        final int min = remainingObjectsMax < 0 ? 0 : Math.max(0, n - remainingObjectsMax);
+        final int max = remainingObjectsMin < 0 ? n : Math.max(min, n - remainingObjectsMin);
+        final List<T> ordered = pick("order", title + (top == null ? "" : " / " + top), sourceChoices, min, max, null);
+        if (ordered.size() < min) {
             return new OrderResult<>(Lists.newArrayList(sourceChoices), false);
         }
         return new OrderResult<>(ordered, false);
