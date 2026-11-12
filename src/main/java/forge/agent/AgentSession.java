@@ -320,8 +320,14 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         if (!force && game == yieldSentForGame && want == yieldSent) {
             return;
         }
+        if (want && acting && Thread.currentThread() != actingThread) {
+            return; // an action is on its way to the host; the next change will try again
+        }
         yieldSentForGame = game;
         yieldSent = want;
+        if (want) {
+            lastYieldOnAt = System.currentTimeMillis();
+        }
         try {
             c.setYieldPref(FPref.YIELD_AUTO_PASS_NO_ACTIONS, String.valueOf(want));
         } catch (final RuntimeException e) {
@@ -379,8 +385,19 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
      */
     void act(final String action, final Integer id, final Integer color) throws InterruptedException {
         synchronized (actLock) {
+            // Let the host finish anything a just-sent "auto-pass on" started before we resume its game thread.
+            final long clear = lastYieldOnAt + YIELD_ON_GAP_MILLIS - System.currentTimeMillis();
+            if (clear > 0) {
+                Thread.sleep(clear);
+            }
             long seen = revision.get();
-            send(action, id, color);
+            acting = true;
+            actingThread = Thread.currentThread();
+            try {
+                send(action, id, color);
+            } finally {
+                acting = false;
+            }
             // First reaction, then let it settle: the host sends several updates per action.
             final long deadline = System.currentTimeMillis() + ACT_SETTLE_MILLIS;
             long wait = ACT_FIRST_REACTION_MILLIS;
@@ -398,23 +415,39 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private static final long ACT_FIRST_REACTION_MILLIS = 1500;
     private static final long ACT_QUIET_MILLIS = 400;
     private static final long ACT_SETTLE_MILLIS = 3000;
+    /** No action is sent this soon after switching auto-pass on. */
+    private static final long YIELD_ON_GAP_MILLIS = 750;
+    private volatile long lastYieldOnAt;
+    private volatile boolean acting;
+    private volatile Thread actingThread;
     private final Object actLock = new Object();
 
     private void send(final String action, final Integer id, final Integer color) {
         final IGameController c = controller();
         final GameView gv = gui.getGameView();
         final PlayerView me = gui.getCurrentPlayer();
+        // The two clicks that end our turn: End Turn, and OK in our end step with nothing on the stack.
+        int endsTurn = -1;
         if (gv != null && me != null && gv.getPlayerTurn() != null && gv.getPlayerTurn().getId() == me.getId()) {
-            // The two clicks that end our turn: End Turn, and OK in our end step with nothing on the stack.
-            // Tell the host to auto-pass first, or it reaches the opponent's upkeep before the setting does.
             final boolean endTurn = "cancel".equals(action) && "End Turn".equals(gui.cancelLabel);
             final boolean lastPass = "ok".equals(action) && gv.getPhase() == PhaseType.END_OF_TURN
                     && (gv.getStack() == null || gv.getStack().isEmpty());
             if (endTurn || lastPass) {
-                endedTurn = gv.getTurn();
-                sendYieldPrefs(false);
+                endsTurn = gv.getTurn();
             }
         }
+        sendAction(c, action, id, color);
+        if (endsTurn >= 0) {
+            // Switch auto-pass on for the opponent's turn now, AFTER the click. Switching it on makes the host
+            // recompute our available actions on a network thread if our priority prompt is still up. Sent
+            // before the click, that sweep ran while the click resumed the game thread, and the host died with
+            // a ConcurrentModificationException. After the click there is no prompt of ours for it to sweep.
+            endedTurn = endsTurn;
+            sendYieldPrefs(false);
+        }
+    }
+
+    private void sendAction(final IGameController c, final String action, final Integer id, final Integer color) {
         switch (action) {
             case "ok" -> c.selectButtonOk();
             case "cancel" -> c.selectButtonCancel();
