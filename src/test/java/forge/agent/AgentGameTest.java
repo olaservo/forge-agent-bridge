@@ -36,7 +36,8 @@ import forge.model.FModel;
  * enters trigger with a yes/no prompt, then a library-search dialog), so the pending-decision
  * path is exercised. Policy: answer a decision with its first option; on our main phase try each
  * hand card once (lands get played, spells get cast with Auto payment); otherwise press OK; when
- * OK is disabled, Cancel if allowed, else select the first card in hand (discard to hand size).
+ * OK is disabled, Cancel if allowed, else select the first card the prompt offers, or the first card
+ * in hand (discard to hand size).
  */
 public class AgentGameTest {
 
@@ -133,6 +134,7 @@ public class AgentGameTest {
         int decisions = 0;
         int casts = 0;
         long lastCardSelect = 0;
+        String lastAutoPrompt = null;
         final Set<String> decisionKinds = new LinkedHashSet<>();
         final Set<String> tried = new HashSet<>();
         long seen = -1;
@@ -184,8 +186,12 @@ public class AgentGameTest {
                 // The other player is acting; nothing to do. Both signals are needed: the prompt text lags
                 // behind the priority flag, and before the first turn (mulligans) nobody has priority.
             } else if ("Auto".equals(okLabel)) {
+                // Auto can be enabled for a cost the lands cannot pay (a kicked spell); pressing it again changes
+                // nothing, so the second time on the same prompt, cancel.
+                final boolean again = g.get("prompt").getAsString().equals(lastAutoPrompt);
+                lastAutoPrompt = again ? null : g.get("prompt").getAsString();
                 actions++;
-                http.post("/game/act", BridgeHttp.body("action", okEnabled ? "ok" : "cancel"));
+                http.post("/game/act", BridgeHttp.body("action", okEnabled && !again ? "ok" : "cancel"));
             } else if (okEnabled && myTurn && "COMBAT_DECLARE_ATTACKERS".equals(phase) && tried.add(g.get("turn").getAsInt() + ":attack")) {
                 actions++;
                 http.post("/game/act", BridgeHttp.body("action", "alphaStrike"));
@@ -205,7 +211,9 @@ public class AgentGameTest {
                 actions++;
                 http.post("/game/act", BridgeHttp.body("action", "cancel"));
             } else if (System.currentTimeMillis() - lastCardSelect > 2_000) {
-                final JsonObject card = firstCardInHand(g);
+                // A prompt that accepts only some cards says which in selection (a discard of the highest mana value).
+                final JsonObject card = g.has("selection")
+                        ? g.getAsJsonObject("selection").getAsJsonArray("cards").get(0).getAsJsonObject() : firstCardInHand(g);
                 if (card != null) {
                     actions++;
                     lastCardSelect = System.currentTimeMillis();
