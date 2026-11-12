@@ -164,7 +164,29 @@ final class AgentGuiGame extends NetworkGuiGame {
     @Override
     public List<CardView> manipulateCardList(final String title, final Iterable<CardView> cards, final Iterable<CardView> manipulable,
             final boolean toTop, final boolean toBottom, final boolean toAnywhere) {
-        return Lists.newArrayList(cards);
+        // A host with "select from card displays" on (the desktop default) sends scry and surveil here: cards is
+        // the whole library and manipulable the cards looked at. The host reads the answer as the library in its
+        // new order, the cards kept on top first and the ones sent to the bottom last.
+        final List<CardView> all = Lists.newArrayList(cards);
+        final List<CardView> looked = Lists.newArrayList(manipulable);
+        if (looked.isEmpty()) {
+            return all;
+        }
+        final int n = looked.size();
+        final List<CardView> top = pick("order", title + " / Choose the cards to keep on top, the first one topmost. The rest go to the bottom.",
+                looked, toBottom ? 0 : n, toTop ? n : 0, null);
+        final List<CardView> out = new ArrayList<>(top);
+        for (final CardView c : all) {
+            if (!looked.contains(c)) {
+                out.add(c);
+            }
+        }
+        for (final CardView c : looked) {
+            if (!top.contains(c)) {
+                out.add(c);
+            }
+        }
+        return out;
     }
 
     @Override
