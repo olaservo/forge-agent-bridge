@@ -110,6 +110,19 @@ final class AgentGuiGame extends NetworkGuiGame {
     @Override
     public <T> List<T> getChoices(final String message, final int min, final int max, final List<T> choices,
             final List<T> selected, final FSerializableFunction<T, String> display) {
+        if (min < 0 && max < 0) {
+            // A reveal: the host shows a list and expects nothing back. Asking the seat would park the host
+            // until it answered, and a reveal sent while the seat concedes kept the game from ending.
+            final List<String> shown = new ArrayList<>();
+            if (choices != null) {
+                for (final T c : choices) {
+                    shown.add(display != null ? display.apply(c) : String.valueOf(c));
+                }
+            }
+            messages.add("Revealed, " + message + ": " + String.join(", ", shown));
+            changed();
+            return new ArrayList<>();
+        }
         return pick("choices", message, choices, min, max, display);
     }
 
