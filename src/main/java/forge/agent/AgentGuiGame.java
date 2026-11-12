@@ -43,6 +43,8 @@ final class AgentGuiGame extends NetworkGuiGame {
     volatile int incorrectActions;
     volatile TrackableCollection<PlayerView> myPlayers;
     volatile PendingDecision pending;
+    /** Counts games opened, so the session can tell a new game from the one it already set up. */
+    volatile int gamesOpened;
     final List<String> messages = new CopyOnWriteArrayList<>();
 
     AgentGuiGame(final Runnable onChange) {
@@ -271,6 +273,7 @@ final class AgentGuiGame extends NetworkGuiGame {
     public void openView(final TrackableCollection<PlayerView> myPlayers) {
         this.myPlayers = myPlayers;
         gameFinished = false;
+        gamesOpened++;
         changed();
     }
 

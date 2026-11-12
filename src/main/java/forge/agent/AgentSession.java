@@ -33,6 +33,7 @@ import forge.interfaces.IGameController;
 import forge.interfaces.ILobbyListener;
 import forge.item.PaperCard;
 import forge.localinstance.properties.ForgeConstants;
+import forge.localinstance.properties.ForgePreferences.FPref;
 import forge.model.FModel;
 import forge.trackable.TrackableTypes;
 import forge.util.collect.FCollectionView;
@@ -73,11 +74,16 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private volatile String poolEventId;
     private volatile String poolPath;
 
+    // Forge's own "auto-pass when no actions are available" setting, sent to the host for our seat in each game.
+    private volatile boolean autoPassNoActions = true;
+    private volatile int yieldSentForGame;
+
     long revision() {
         return revision.get();
     }
 
     private void changed() {
+        sendYieldPrefs(false);
         revision.incrementAndGet();
         synchronized (changeLock) {
             changeLock.notifyAll();
@@ -263,6 +269,30 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     }
 
     // ---- game actions ----
+
+    /**
+     * Tells the host whether to pass priority for our seat when it has no available actions. The host keeps
+     * the setting per game, so it is sent once for each game opened and again whenever it is changed.
+     */
+    private void sendYieldPrefs(final boolean force) {
+        final int game = gui.gamesOpened;
+        final IGameController c = gui.getGameController();
+        if (c == null || game == 0 || (!force && game == yieldSentForGame)) {
+            return;
+        }
+        yieldSentForGame = game;
+        try {
+            c.setYieldPref(FPref.YIELD_AUTO_PASS_NO_ACTIONS, String.valueOf(autoPassNoActions));
+        } catch (final RuntimeException e) {
+            System.err.println("[agent] could not send the auto-pass setting: " + e);
+        }
+    }
+
+    void setAutoPassNoActions(final boolean enabled) {
+        autoPassNoActions = enabled;
+        sendYieldPrefs(true);
+        changed();
+    }
 
     private IGameController controller() {
         final IGameController c = gui.getGameController();
@@ -535,6 +565,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         m.put("winner", gv.getWinningPlayerName());
         final PlayerView me = gui.getCurrentPlayer();
         m.put("me", me == null ? null : me.getName());
+        m.put("autoPassNoActions", autoPassNoActions);
+        m.put("hasAvailableActions", me == null ? null : me.hasAvailableActions());
         if (!full) {
             return m;
         }

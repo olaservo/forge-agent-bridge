@@ -31,6 +31,11 @@ import forge.model.FModel;
 public final class AgentBridge {
 
     private final AgentSession session = new AgentSession();
+
+    /** Whether new games start with the host passing priority for our seat when it has no available actions. */
+    void setAutoPassNoActions(final boolean enabled) {
+        session.setAutoPassNoActions(enabled);
+    }
     private final Gson gson = new GsonBuilder().serializeNulls().disableHtmlEscaping().create();
     private HttpServer server;
 
@@ -123,6 +128,9 @@ public final class AgentBridge {
                 session.act(str(body, "action", null), id, color);
                 return session.gameSnapshot(false);
             }
+            case "POST /game/yield":
+                session.setAutoPassNoActions(!body.has("autoPassNoActions") || body.get("autoPassNoActions").getAsBoolean());
+                return session.gameSnapshot(false);
             case "POST /game/decide": {
                 final int id = body.get("id").getAsInt();
                 final List<Integer> indices = new ArrayList<>();

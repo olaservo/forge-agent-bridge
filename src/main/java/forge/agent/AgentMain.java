@@ -7,7 +7,7 @@ import forge.model.FModel;
 /**
  * A headless Forge network client behind a local HTTP JSON API, for forge-mcp-server. Runs until killed.
  * Start it with Forge's own jar on the classpath, from the folder that holds Forge's {@code res}:
- * {@code java -cp <forge jar><path separator><this jar> forge.agent.AgentMain [--port N]}.
+ * {@code java -cp <forge jar><path separator><this jar> forge.agent.AgentMain [--port N] [--no-auto-pass]}.
  */
 public final class AgentMain {
 
@@ -16,9 +16,12 @@ public final class AgentMain {
 
     public static void main(final String[] args) {
         int port = 36744;
+        boolean autoPass = true;
         for (int i = 0; i < args.length; i++) {
             if ("--port".equals(args[i]) && i + 1 < args.length) {
                 port = Integer.parseInt(args[++i]);
+            } else if ("--no-auto-pass".equals(args[i])) {
+                autoPass = false;
             }
         }
 
@@ -33,6 +36,7 @@ public final class AgentMain {
         System.err.println("[agent] card database loaded in " + (System.currentTimeMillis() - t0) + " ms");
 
         final AgentBridge bridge = new AgentBridge();
+        bridge.setAutoPassNoActions(autoPass);
         try {
             bridge.start(port);
         } catch (final Exception e) {

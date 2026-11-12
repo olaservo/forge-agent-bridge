@@ -36,6 +36,10 @@ java -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Dio.netty.tryReflectionSetA
 
 It prints `AGENT_BRIDGE_READY port=36744` once the card database has loaded, about 30 to 40 seconds.
 
+## Auto-pass
+
+By default the bridge turns on Forge's own "auto-pass when no actions are available" setting for its seat in every game, so the host passes priority for the seat when it has nothing it could play or activate. Declaring attackers and blockers and answering choices are still asked. Start with `--no-auto-pass` to leave it off, or switch it during a game with `POST /game/yield {"autoPassNoActions": false}`. The game state reports `autoPassNoActions` and `hasAvailableActions`.
+
 ## HTTP API
 
 All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
@@ -45,7 +49,7 @@ All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 - `POST /lobby/ready {ready}`, `POST /lobby/avatar {index}`, `POST /lobby/deck {name}` or `{dck}`
 - `POST /chat {text}`
 - `GET /draft/pack`, `POST /draft/pick {card}`, `GET /draft/pool`
-- `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}`
+- `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}`, `POST /game/yield {autoPassNoActions}`
 
 ## Test
 
