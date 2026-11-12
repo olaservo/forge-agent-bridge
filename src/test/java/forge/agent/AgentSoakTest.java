@@ -64,9 +64,24 @@ import forge.player.PlayerControllerHuman;
 public class AgentSoakTest {
 
     private static final int HOST_PORT = 36796;
-    private static final long GAME_MILLIS = 360_000;
+    /** A game still going after this long is conceded, wherever it is. Lower it to test conceding mid-game. */
+    private static final long GAME_MILLIS = Long.getLong("agent.soak.gameSeconds", 360) * 1000;
+    private static final long CONCEDE_MILLIS = 30_000;
     private static final long STALL_MILLIS = 20_000;
     private static final int MAX_TURN = 30;
+
+    /** Every second game: cheap creatures, so the seat has blockers and the combat prompts come up. */
+    private static final String CREATURES = String.join("\n",
+            "[metadata]",
+            "Name=Soak creatures",
+            "[Main]",
+            "17 Forest",
+            "4 Llanowar Elves",
+            "4 Grizzly Bears",
+            "4 Runeclaw Bear",
+            "4 Centaur Courser",
+            "4 Giant Spider",
+            "3 Rumbling Baloth");
 
     private final int games = Integer.getInteger("agent.soak.games", 0);
     private final long seed = Long.getLong("agent.soak.seed", System.currentTimeMillis());
@@ -168,12 +183,18 @@ public class AgentSoakTest {
         final LobbySlot hostSlot = lobby.getSlot(0);
         hostSlot.setDeck(DeckgenUtil.getRandomColorDeck(true));
         hostSlot.setIsReady(true);
-        final Deck mine = randomDeck();
-        final String deckName = mine.getName();
-        final File tmp = File.createTempFile("agent-soak", ".dck");
-        DeckSerializer.writeDeck(mine, tmp);
-        http.post("/lobby/deck", BridgeHttp.body("dck", Files.readString(tmp.toPath())));
-        tmp.delete();
+        final String deckName;
+        if (index % 2 == 1) {
+            deckName = "Soak creatures";
+            http.post("/lobby/deck", BridgeHttp.body("dck", CREATURES));
+        } else {
+            final Deck mine = randomDeck();
+            deckName = mine.getName();
+            final File tmp = File.createTempFile("agent-soak", ".dck");
+            DeckSerializer.writeDeck(mine, tmp);
+            http.post("/lobby/deck", BridgeHttp.body("dck", Files.readString(tmp.toPath())));
+            tmp.delete();
+        }
         http.post("/lobby/ready", BridgeHttp.body("ready", true));
         AgentGameTest.waitFor("host sees the agent's deck and ready flag", 20_000,
                 () -> lobby.getSlot(1).isReady() && lobby.getSlot(1).getDeck() != null);
@@ -188,6 +209,7 @@ public class AgentSoakTest {
         long lastProgress = began;
         String lastSig = "";
         int stallsHere = 0;
+        long concededAt = 0;
         long seen = -1;
         int quiet = 0;
         String ending = "played out";
@@ -223,6 +245,18 @@ public class AgentSoakTest {
                 compare(index);
             }
 
+            if (concededAt > 0) {
+                // Conceding ends the game at once unless the host is still waiting on the seat for something.
+                if (deciding) {
+                    answer(pd.getAsJsonObject());
+                } else if (now - concededAt > CONCEDE_MILLIS) {
+                    deadPrompts.add("game " + index + " turn " + str(g.get("turn")) + ": conceded and the game did not end, host input "
+                            + (hostInput == null ? "none" : name(hostInput)) + ", prompt \"" + firstLine(prompt) + "\"");
+                    break;
+                }
+                continue;
+            }
+
             // Stalls: nothing on either side has changed for a while.
             final String sig = signature(g) + "|" + (hostInput == null ? "" : name(hostInput));
             if (!sig.equals(lastSig)) {
@@ -241,6 +275,7 @@ public class AgentSoakTest {
                 lastProgress = now;
                 if (++stallsHere >= 3) {
                     ending = "conceded after stalls";
+                    concededAt = now;
                     act("concede", null);
                     continue;
                 }
@@ -249,6 +284,7 @@ public class AgentSoakTest {
             }
             if (now - began > GAME_MILLIS || g.get("turn").getAsInt() > MAX_TURN) {
                 ending = "conceded at the time or turn limit";
+                concededAt = now;
                 act("concede", null);
                 continue;
             }
@@ -308,11 +344,15 @@ public class AgentSoakTest {
                         blocksShownBeforeOk++;
                     }
                 }
-            } else if (okEnabled && myTurn && phase.startsWith("MAIN") && stackEmpty && settled && nextUntried(me, tried, turnKey) != null) {
+            } else if (okEnabled && myTurn && phase.startsWith("MAIN") && stackEmpty && nextUntried(me, tried, turnKey) != null) {
                 // Each hand card and each nonland permanent once a turn: land drops, casts and abilities.
+                if (!settled) {
+                    continue; // not OK: that would pass priority and leave the main phase
+                }
                 final JsonObject card = nextUntried(me, tried, turnKey);
                 tried.add(turnKey + "play:" + card.get("id").getAsInt());
                 lastCardSelect = System.currentTimeMillis();
+                lastProgress = lastCardSelect; // the host does not react to a card that cannot be played
                 act("selectCard", card.get("id").getAsInt());
             } else if (okEnabled) {
                 act("ok", null);
@@ -554,9 +594,19 @@ public class AgentSoakTest {
         if (me == null) {
             return null;
         }
+        // Lands first: a spell tried before the land drop fails for mana and is not tried again that turn.
         final List<JsonElement> cards = new ArrayList<>();
         if (me.has("hand")) {
-            me.getAsJsonArray("hand").forEach(cards::add);
+            for (final JsonElement c : me.getAsJsonArray("hand")) {
+                if (str(c.getAsJsonObject().get("type")).contains("Land")) {
+                    cards.add(c);
+                }
+            }
+            for (final JsonElement c : me.getAsJsonArray("hand")) {
+                if (!str(c.getAsJsonObject().get("type")).contains("Land")) {
+                    cards.add(c);
+                }
+            }
         }
         for (final JsonElement c : me.getAsJsonArray("battlefield")) {
             if (!str(c.getAsJsonObject().get("type")).contains("Land")) {
