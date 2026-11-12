@@ -290,11 +290,12 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         if (AUTO_PASS_OFF.equals(autoPass) || gv == null || me == null || gv.getPlayerTurn() == null) {
             return false;
         }
+        final PhaseType phase = gv.getPhase();
         if (gv.getPlayerTurn().getId() == me.getId()) {
-            return false;
+            // Switch on in our cleanup step, where nobody gets priority, so it is in place for the opponent's upkeep.
+            return phase == PhaseType.CLEANUP;
         }
         // Switch off before the opponent's turn ends, so the setting has reached the host by our main phase.
-        final PhaseType phase = gv.getPhase();
         return phase != PhaseType.END_OF_TURN && phase != PhaseType.CLEANUP;
     }
 

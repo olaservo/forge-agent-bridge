@@ -337,6 +337,7 @@ final class AgentGuiGame extends NetworkGuiGame {
     public void openView(final TrackableCollection<PlayerView> myPlayers) {
         this.myPlayers = myPlayers;
         gameFinished = false;
+        messages.clear();
         gamesOpened++;
         changed();
     }
