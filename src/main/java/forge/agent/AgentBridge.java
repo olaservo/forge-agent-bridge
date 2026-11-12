@@ -32,9 +32,9 @@ public final class AgentBridge {
 
     private final AgentSession session = new AgentSession();
 
-    /** Whether new games start with the host passing priority for our seat when it has no available actions. */
-    void setAutoPassNoActions(final boolean enabled) {
-        session.setAutoPassNoActions(enabled);
+    /** When the host passes priority for our seat if it has no available actions: off, opponent-turns or always. */
+    void setAutoPass(final String mode) {
+        session.setAutoPass(mode);
     }
     private final Gson gson = new GsonBuilder().serializeNulls().disableHtmlEscaping().create();
     private HttpServer server;
@@ -129,7 +129,13 @@ public final class AgentBridge {
                 return session.gameSnapshot(false);
             }
             case "POST /game/yield":
-                session.setAutoPassNoActions(!body.has("autoPassNoActions") || body.get("autoPassNoActions").getAsBoolean());
+                if (body.has("autoPass")) {
+                    session.setAutoPass(body.get("autoPass").getAsString());
+                } else {
+                    // The first build took a boolean.
+                    final boolean on = !body.has("autoPassNoActions") || body.get("autoPassNoActions").getAsBoolean();
+                    session.setAutoPass(on ? AgentSession.AUTO_PASS_OPPONENT_TURNS : AgentSession.AUTO_PASS_OFF);
+                }
                 return session.gameSnapshot(false);
             case "POST /game/decide": {
                 final int id = body.get("id").getAsInt();

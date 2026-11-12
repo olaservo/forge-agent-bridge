@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import forge.deck.Deck;
 import forge.game.GameLogEntry;
 import forge.game.GameView;
+import forge.game.phase.PhaseType;
 import forge.game.card.CardView;
 import forge.game.card.CardView.CardStateView;
 import forge.game.combat.CombatView;
@@ -74,9 +75,18 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private volatile String poolEventId;
     private volatile String poolPath;
 
-    // Forge's own "auto-pass when no actions are available" setting, sent to the host for our seat in each game.
-    private volatile boolean autoPassNoActions = true;
+    /**
+     * When the host passes priority for our seat because it has no available actions (Forge's own setting).
+     * Forge's check looks at the hand, the battlefield and flashback cards only, so it misses a cast or an
+     * ability from the graveyard. On our own turn that skipped a main phase with legal plays, so the default
+     * applies the setting during opponents' turns only.
+     */
+    static final String AUTO_PASS_OFF = "off";
+    static final String AUTO_PASS_OPPONENT_TURNS = "opponent-turns";
+    static final String AUTO_PASS_ALWAYS = "always";
+    private volatile String autoPass = AUTO_PASS_OPPONENT_TURNS;
     private volatile int yieldSentForGame;
+    private volatile boolean yieldSent;
 
     long revision() {
         return revision.get();
@@ -270,26 +280,52 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
 
     // ---- game actions ----
 
+    /** Whether the host should be auto-passing for our seat right now, given the mode and whose turn it is. */
+    private boolean wantAutoPass() {
+        if (AUTO_PASS_ALWAYS.equals(autoPass)) {
+            return true;
+        }
+        final GameView gv = gui.getGameView();
+        final PlayerView me = gui.getCurrentPlayer();
+        if (AUTO_PASS_OFF.equals(autoPass) || gv == null || me == null || gv.getPlayerTurn() == null) {
+            return false;
+        }
+        if (gv.getPlayerTurn().getId() == me.getId()) {
+            return false;
+        }
+        // Switch off before the opponent's turn ends, so the setting has reached the host by our main phase.
+        final PhaseType phase = gv.getPhase();
+        return phase != PhaseType.END_OF_TURN && phase != PhaseType.CLEANUP;
+    }
+
     /**
-     * Tells the host whether to pass priority for our seat when it has no available actions. The host keeps
-     * the setting per game, so it is sent once for each game opened and again whenever it is changed.
+     * Sends the host our auto-pass setting when it differs from what was last sent for this game. The host
+     * keeps it per game. Called on every change, so it follows the turn.
      */
     private void sendYieldPrefs(final boolean force) {
         final int game = gui.gamesOpened;
         final IGameController c = gui.getGameController();
-        if (c == null || game == 0 || (!force && game == yieldSentForGame)) {
+        if (c == null || game == 0) {
+            return;
+        }
+        final boolean want = wantAutoPass();
+        if (!force && game == yieldSentForGame && want == yieldSent) {
             return;
         }
         yieldSentForGame = game;
+        yieldSent = want;
         try {
-            c.setYieldPref(FPref.YIELD_AUTO_PASS_NO_ACTIONS, String.valueOf(autoPassNoActions));
+            c.setYieldPref(FPref.YIELD_AUTO_PASS_NO_ACTIONS, String.valueOf(want));
         } catch (final RuntimeException e) {
             System.err.println("[agent] could not send the auto-pass setting: " + e);
         }
     }
 
-    void setAutoPassNoActions(final boolean enabled) {
-        autoPassNoActions = enabled;
+    void setAutoPass(final String mode) {
+        if (!AUTO_PASS_OFF.equals(mode) && !AUTO_PASS_OPPONENT_TURNS.equals(mode) && !AUTO_PASS_ALWAYS.equals(mode)) {
+            throw new IllegalArgumentException("autoPass must be off, opponent-turns or always");
+        }
+        autoPass = mode;
         sendYieldPrefs(true);
         changed();
     }
@@ -565,8 +601,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         m.put("winner", gv.getWinningPlayerName());
         final PlayerView me = gui.getCurrentPlayer();
         m.put("me", me == null ? null : me.getName());
-        m.put("autoPassNoActions", autoPassNoActions);
-        m.put("hasAvailableActions", me == null ? null : me.hasAvailableActions());
+        m.put("autoPass", autoPass);
+        m.put("autoPassNow", yieldSent && gui.gamesOpened == yieldSentForGame);
         if (!full) {
             return m;
         }

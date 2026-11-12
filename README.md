@@ -38,7 +38,15 @@ It prints `AGENT_BRIDGE_READY port=36744` once the card database has loaded, abo
 
 ## Auto-pass
 
-By default the bridge turns on Forge's own "auto-pass when no actions are available" setting for its seat in every game, so the host passes priority for the seat when it has nothing it could play or activate. Declaring attackers and blockers and answering choices are still asked. Start with `--no-auto-pass` to leave it off, or switch it during a game with `POST /game/yield {"autoPassNoActions": false}`. The game state reports `autoPassNoActions` and `hasAvailableActions`.
+Forge has a per-player setting that passes priority for a player who has no available actions. The bridge sends it to the host for its seat, in one of three modes:
+
+- `opponent-turns` (default): on during opponents' turns, off during the seat's own turn and from the opponent's end step.
+- `always`: on for the whole game.
+- `off`: never.
+
+Start with `--auto-pass <mode>`, or switch during a game with `POST /game/yield {"autoPass": "<mode>"}`. The game summary reports `autoPass` (the mode) and `autoPassNow` (what the host was last told).
+
+`always` is not safe. Forge decides "no available actions" by looking at the hand, the battlefield and flashback cards (`forge.ai.AvailableActions`). It does not look at other graveyard casts or abilities, and it does not count mana from a graveyard ability. In a live game on 2026-11-11 that skipped the seat's main phase while it could cast a card with disturb from its graveyard. On an opponent's turn the same gap can still hide an instant-speed play from the graveyard. Declaring attackers and blockers and answering choices are separate prompts and are still asked in every mode.
 
 ## HTTP API
 
@@ -49,7 +57,7 @@ All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 - `POST /lobby/ready {ready}`, `POST /lobby/avatar {index}`, `POST /lobby/deck {name}` or `{dck}`
 - `POST /chat {text}`
 - `GET /draft/pack`, `POST /draft/pick {card}`, `GET /draft/pool`
-- `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}`, `POST /game/yield {autoPassNoActions}`
+- `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}`, `POST /game/yield {autoPass}`
 
 ## Test
 
