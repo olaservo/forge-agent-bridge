@@ -402,11 +402,15 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
 
     private void send(final String action, final Integer id, final Integer color) {
         final IGameController c = controller();
-        if ("cancel".equals(action) && "End Turn".equals(gui.cancelLabel)) {
-            // Tell the host to auto-pass before the yield races through to the opponent's upkeep.
-            final GameView gv = gui.getGameView();
-            final PlayerView me = gui.getCurrentPlayer();
-            if (gv != null && me != null && gv.getPlayerTurn() != null && gv.getPlayerTurn().getId() == me.getId()) {
+        final GameView gv = gui.getGameView();
+        final PlayerView me = gui.getCurrentPlayer();
+        if (gv != null && me != null && gv.getPlayerTurn() != null && gv.getPlayerTurn().getId() == me.getId()) {
+            // The two clicks that end our turn: End Turn, and OK in our end step with nothing on the stack.
+            // Tell the host to auto-pass first, or it reaches the opponent's upkeep before the setting does.
+            final boolean endTurn = "cancel".equals(action) && "End Turn".equals(gui.cancelLabel);
+            final boolean lastPass = "ok".equals(action) && gv.getPhase() == PhaseType.END_OF_TURN
+                    && (gv.getStack() == null || gv.getStack().isEmpty());
+            if (endTurn || lastPass) {
                 endedTurn = gv.getTurn();
                 sendYieldPrefs(false);
             }
