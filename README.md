@@ -16,7 +16,7 @@ One bridge is one seat. It listens on `127.0.0.1` only and has no authentication
 - A Forge desktop build: its `forge-gui-desktop-<version>-jar-with-dependencies.jar` and the folder that holds Forge's `res`.
 - The bridge calls Forge's internal classes, which change between versions. Build it against the Forge version you will run, and have the host run that version too.
 
-Built and run against Forge `2.0.16-SNAPSHOT` (upstream commit `bdcce440b7c`). Not yet tried against a Forge release download.
+Built against Forge `2.0.16-SNAPSHOT` (upstream commit `bdcce440b7c`) and run on 2026-11-11 against a desktop host of the same build: connect, lobby, avatar, chat and disconnect. The Forge jar used was built from a fork that also carries these classes, with this jar first on the classpath. Not yet tried against a Forge release download.
 
 ## Build
 
