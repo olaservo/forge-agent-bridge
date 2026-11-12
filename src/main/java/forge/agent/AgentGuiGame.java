@@ -1,6 +1,7 @@
 package forge.agent;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -12,6 +13,7 @@ import forge.LobbyPlayer;
 import forge.deck.CardPool;
 import forge.game.GameEntityView;
 import forge.game.card.CardView;
+import forge.game.card.CardView.CardStateView;
 import forge.game.phase.PhaseType;
 import forge.game.player.DelayedReveal;
 import forge.game.player.IHasIcon;
@@ -189,16 +191,78 @@ final class AgentGuiGame extends NetworkGuiGame {
         }
     }
 
+    /**
+     * Divides combat damage without asking: lethal damage to each creature in the order given, and what is left
+     * to the defending player if the assigning creature has trample, otherwise to the first creature. The host
+     * treats a null answer as "assign another creature first" and asks again, so null stalls the game when this
+     * is the only creature left to assign.
+     */
     @Override
     public Map<CardView, Integer> assignCombatDamage(final CardView attacker, final List<CardView> blockers, final int damage,
             final GameEntityView defender, final boolean overrideOrder, final boolean maySkip) {
-        return null; // host assigns in damage order
+        final Map<CardView, Integer> assigned = new LinkedHashMap<>();
+        final CardStateView state = attacker.getCurrentState();
+        final boolean deathtouch = state != null && state.hasDeathtouch();
+        final boolean trample = state != null && state.hasTrample();
+        int left = damage;
+        for (final CardView blocker : blockers) {
+            if (left <= 0) {
+                break;
+            }
+            final int lethal = deathtouch ? 1 : Math.max(1, blocker.getLethalDamage());
+            final int given = Math.min(left, lethal);
+            assigned.put(blocker, given);
+            left -= given;
+        }
+        if (left > 0) {
+            if (blockers.isEmpty() || (trample && defender != null)) {
+                assigned.put(null, left); // a null key is the defender
+            } else {
+                assigned.merge(blockers.get(0), left, Integer::sum);
+            }
+        }
+        messages.add("Combat damage assigned for " + attacker + ": " + describe(assigned));
+        changed();
+        return assigned;
     }
 
+    private static String describe(final Map<CardView, Integer> assigned) {
+        final StringBuilder sb = new StringBuilder();
+        for (final Map.Entry<CardView, Integer> e : assigned.entrySet()) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(e.getValue()).append(" to ").append(e.getKey() == null ? "the defender" : e.getKey().toString());
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Divides an amount (damage, counters, a shield) among targets without asking: one each first when every
+     * target needs at least one, and the rest to the first target.
+     */
     @Override
     public Map<Object, Integer> assignGenericAmount(final CardView effectSource, final Map<Object, Integer> target, final int amount,
             final boolean atLeastOne, final String amountLabel) {
-        return null; // host distributes
+        final Map<Object, Integer> assigned = new LinkedHashMap<>();
+        if (target == null || target.isEmpty()) {
+            return assigned;
+        }
+        int left = amount;
+        for (final Object t : target.keySet()) {
+            final int given = atLeastOne && left > 0 ? 1 : 0;
+            assigned.put(t, given);
+            left -= given;
+        }
+        if (left > 0) {
+            final Object first = target.keySet().iterator().next();
+            final Integer cap = target.get(first);
+            final int extra = cap == null || cap <= 0 ? left : Math.min(left, Math.max(0, cap - assigned.get(first)));
+            assigned.merge(first, extra, Integer::sum);
+        }
+        messages.add("Divided " + amount + " " + amountLabel + " for " + effectSource + " without asking");
+        changed();
+        return assigned;
     }
 
     @Override
