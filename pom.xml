@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.github.olaservo</groupId>
+    <artifactId>forge-agent-bridge</artifactId>
+    <version>0.1.0</version>
+    <packaging>jar</packaging>
+
+    <name>forge-agent-bridge</name>
+    <description>A headless Forge network client behind a local HTTP JSON API, so an agent can take a seat in a Forge lobby.</description>
+    <url>https://github.com/olaservo/forge-agent-bridge</url>
+
+    <licenses>
+        <license>
+            <name>GNU General Public License v3.0</name>
+            <url>https://www.gnu.org/licenses/gpl-3.0.txt</url>
+        </license>
+    </licenses>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>17</maven.compiler.release>
+        <!-- Forge's forge-gui-desktop-<version>-jar-with-dependencies.jar: pass -Dforge.jar=<absolute path> -->
+        <forge.jar>${project.basedir}/forge.jar</forge.jar>
+        <!-- The folder that holds Forge's res, used as the working directory for tests: -Dforge.home=<path> -->
+        <forge.home>${project.basedir}</forge.home>
+        <skipTests>true</skipTests>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>forge</groupId>
+            <artifactId>forge-gui-desktop</artifactId>
+            <version>local</version>
+            <scope>system</scope>
+            <systemPath>${forge.jar}</systemPath>
+        </dependency>
+        <dependency>
+            <groupId>org.testng</groupId>
+            <artifactId>testng</artifactId>
+            <version>7.10.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>forge.agent.AgentMain</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
+                <configuration>
+                    <workingDirectory>${forge.home}</workingDirectory>
+                    <argLine>-Djava.awt.headless=true -Dfile.encoding=UTF-8 -Dio.netty.tryReflectionSetAccessible=true -Xmx3072m</argLine>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

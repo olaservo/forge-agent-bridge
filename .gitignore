@@ -1,0 +1,5 @@
+target/
+forge.jar
+*.log
+.idea/
+*.iml
