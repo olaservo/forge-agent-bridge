@@ -69,6 +69,12 @@ mvn -B test -DskipTests=false -Dforge.jar=<forge jar> -Dforge.home=<folder that 
 
 They also record the bridge's responses under `target/agent-fixtures`, which forge-mcp-server uses as test fixtures.
 
+`AgentSoakTest` is off unless asked for. It plays games with random decks on both seats and compares the bridge's game state with the host's own at every prompt. It fails if they disagree, if the host waits on the seat while the bridge shows nothing to answer, or if a card offered in `selection` is refused. It writes `target/agent-soak/report.json`, which also lists the host inputs and decision kinds the games reached. A game takes two to four minutes.
+
+```
+mvn -B test -DskipTests=false -Dtest=AgentSoakTest -Dagent.soak.games=3 -Dforge.jar=<forge jar> -Dforge.home=<folder that holds res>
+```
+
 ## License
 
 GPL-3.0, the same licence as Forge, because the bridge is built on Forge's code. Copyright (c) 2026 Carbon-Based Content LLC. See [LICENSE](LICENSE).
