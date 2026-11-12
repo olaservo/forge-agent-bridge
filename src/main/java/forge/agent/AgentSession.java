@@ -87,6 +87,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private volatile String autoPass = AUTO_PASS_OPPONENT_TURNS;
     private volatile int yieldSentForGame;
     private volatile boolean yieldSent;
+    /** The game turn on which we pressed End Turn on our own turn, or -1. We are done with that turn. */
+    private volatile int endedTurn = -1;
 
     long revision() {
         return revision.get();
@@ -292,8 +294,10 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
         final PhaseType phase = gv.getPhase();
         if (gv.getPlayerTurn().getId() == me.getId()) {
-            // Switch on in our cleanup step, where nobody gets priority, so it is in place for the opponent's upkeep.
-            return phase == PhaseType.CLEANUP;
+            // On once we have pressed End Turn, or in our cleanup step where nobody gets priority, so that it is
+            // in place for the opponent's upkeep. Sent only at the opponent's turn, it arrives after the host has
+            // already asked us.
+            return phase == PhaseType.CLEANUP || gv.getTurn() == endedTurn;
         }
         // Switch off before the opponent's turn ends, so the setting has reached the host by our main phase.
         return phase != PhaseType.END_OF_TURN && phase != PhaseType.CLEANUP;
@@ -308,6 +312,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         final IGameController c = gui.getGameController();
         if (c == null || game == 0) {
             return;
+        }
+        if (game != yieldSentForGame) {
+            endedTurn = -1;
         }
         final boolean want = wantAutoPass();
         if (!force && game == yieldSentForGame && want == yieldSent) {
@@ -395,6 +402,15 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
 
     private void send(final String action, final Integer id, final Integer color) {
         final IGameController c = controller();
+        if ("cancel".equals(action) && "End Turn".equals(gui.cancelLabel)) {
+            // Tell the host to auto-pass before the yield races through to the opponent's upkeep.
+            final GameView gv = gui.getGameView();
+            final PlayerView me = gui.getCurrentPlayer();
+            if (gv != null && me != null && gv.getPlayerTurn() != null && gv.getPlayerTurn().getId() == me.getId()) {
+                endedTurn = gv.getTurn();
+                sendYieldPrefs(false);
+            }
+        }
         switch (action) {
             case "ok" -> c.selectButtonOk();
             case "cancel" -> c.selectButtonCancel();
@@ -602,6 +618,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         m.put("winner", gv.getWinningPlayerName());
         final PlayerView me = gui.getCurrentPlayer();
         m.put("me", me == null ? null : me.getName());
+        // The host sends no new prompt when it passes for us, so a "Priority: ..." prompt can outlive our priority.
+        m.put("hasPriority", me == null ? null : me.getHasPriority());
         m.put("autoPass", autoPass);
         m.put("autoPassNow", yieldSent && gui.gamesOpened == yieldSentForGame);
         if (!full) {
