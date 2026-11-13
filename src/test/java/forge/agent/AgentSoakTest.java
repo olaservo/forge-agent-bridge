@@ -355,8 +355,10 @@ public class AgentSoakTest {
                     act("alphaStrike", null);
                 }
             } else if (okEnabled && !myTurn && "COMBAT_DECLARE_BLOCKERS".equals(phase) && g.has("combat") && settled
-                    && untappedCreature(me) != null && !g.getAsJsonArray("combat").isEmpty() && tried.add(turnKey + "block")) {
-                final JsonObject blocker = untappedCreature(me);
+                    && nextBlocker(g, me, tried, turnKey) != null && !g.getAsJsonArray("combat").isEmpty()) {
+                // One creature after another, so that a block the host insists on is found.
+                final JsonObject blocker = nextBlocker(g, me, tried, turnKey);
+                tried.add(turnKey + "block:" + blocker.get("id").getAsInt());
                 final int attacker = g.getAsJsonArray("combat").get(0).getAsJsonObject().get("attackerId").getAsInt();
                 act("selectCard", attacker);
                 act("selectCard", blocker.get("id").getAsInt());
@@ -617,6 +619,22 @@ public class AgentSoakTest {
             if (c.getAsJsonObject().get("id").getAsInt() == id) {
                 return c.getAsJsonObject();
             }
+        }
+        return null;
+    }
+
+    /** An untapped creature of ours not yet tried as a blocker this turn. */
+    private static JsonObject nextBlocker(final JsonObject g, final JsonObject me, final Set<String> tried, final String turnKey) {
+        if (me == null) {
+            return null;
+        }
+        for (final JsonElement c : me.getAsJsonArray("battlefield")) {
+            final JsonObject card = c.getAsJsonObject();
+            if (!str(card.get("type")).contains("Creature") || card.get("tapped").getAsBoolean()
+                    || tried.contains(turnKey + "block:" + card.get("id").getAsInt())) {
+                continue;
+            }
+            return card;
         }
         return null;
     }
