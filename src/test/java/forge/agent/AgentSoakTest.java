@@ -70,15 +70,18 @@ public class AgentSoakTest {
     private static final long STALL_MILLIS = 20_000;
     private static final int MAX_TURN = 30;
 
-    /** Every second game: cheap creatures, so the seat has blockers and the combat prompts come up. */
+    /**
+     * Every second game: cheap creatures, so the seat has blockers and the combat prompts come up. Two of them
+     * have trample; a blocked trampler is the common case where the bridge divides combat damage for the seat.
+     */
     private static final String CREATURES = String.join("\n",
             "[metadata]",
             "Name=Soak creatures",
             "[Main]",
             "17 Forest",
             "4 Llanowar Elves",
-            "4 Grizzly Bears",
-            "4 Runeclaw Bear",
+            "4 Charging Badger",
+            "4 Garruk's Companion",
             "4 Centaur Courser",
             "4 Giant Spider",
             "3 Rumbling Baloth");
@@ -107,6 +110,11 @@ public class AgentSoakTest {
     private int supersededResponses;
     private int blocksDeclared;
     private int blocksShownBeforeOk;
+    private int playerTargetsTried;
+    private int playerTargetsAccepted;
+    /** What the bridge did for the seat without asking, counted from its messages: at least this many. */
+    private final Map<String, Integer> doneForTheSeat = new TreeMap<>();
+    private final Set<String> messagesSeen = new HashSet<>();
 
     @BeforeClass
     public void initializeModel() {
@@ -244,6 +252,14 @@ public class AgentSoakTest {
             if (hostInput != null || deciding) {
                 compare(index);
             }
+            for (final JsonElement m : g.getAsJsonArray("messages")) {
+                final String text = m.getAsString();
+                final String what = text.startsWith("Combat damage assigned") ? "combat damage assigned"
+                        : text.startsWith("Divided ") ? "amount divided" : text.startsWith("Revealed, ") ? "reveal shown" : null;
+                if (what != null && messagesSeen.add(index + ":" + text)) {
+                    doneForTheSeat.merge(what, 1, Integer::sum);
+                }
+            }
 
             if (concededAt > 0) {
                 // Conceding ends the game at once unless the host is still waiting on the seat for something.
@@ -297,6 +313,16 @@ public class AgentSoakTest {
 
             if (deciding) {
                 answer(pd.getAsJsonObject());
+            } else if (hostInput != null && "InputSelectTargets".equals(name(hostInput)) && settled && opponentId(g) >= 0
+                    && tried.add(turnKey + prompt + ":player")) {
+                // The bridge does not say whether a player is a legal target, so try the opponent once per prompt.
+                lastCardSelect = System.currentTimeMillis();
+                playerTargetsTried++;
+                act("selectPlayer", opponentId(g));
+                final Input after = hostInput();
+                if (after == null || !"InputSelectTargets".equals(name(after)) || !prompt.equals(http.get("/game").get("prompt").getAsString())) {
+                    playerTargetsAccepted++;
+                }
             } else if (!offered.isEmpty()) {
                 // The prompt offers cards. Take one we have not tried for this prompt, else finish or back out.
                 if (!settled) {
@@ -565,6 +591,15 @@ public class AgentSoakTest {
         return null;
     }
 
+    private static int opponentId(final JsonObject g) {
+        for (final JsonElement p : g.getAsJsonArray("players")) {
+            if (!p.getAsJsonObject().get("isMe").getAsBoolean()) {
+                return p.getAsJsonObject().get("id").getAsInt();
+            }
+        }
+        return -1;
+    }
+
     private static JsonObject card(final JsonObject me, final int id) {
         if (me == null) {
             return null;
@@ -645,6 +680,9 @@ public class AgentSoakTest {
         report.addProperty("responsesOutOfDateAtOnce", supersededResponses);
         report.addProperty("blocksDeclared", blocksDeclared);
         report.addProperty("blocksShownInCombatBeforeOk", blocksShownBeforeOk);
+        report.addProperty("playerTargetsTried", playerTargetsTried);
+        report.addProperty("playerTargetsAccepted", playerTargetsAccepted);
+        report.add("doneForTheSeatWithoutAsking", gson.toJsonTree(doneForTheSeat));
         report.add("decisionKinds", gson.toJsonTree(decisionKinds));
         report.add("hostInputs", gson.toJsonTree(hostInputs));
         report.add("prompts", gson.toJsonTree(prompts));
