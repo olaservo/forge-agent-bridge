@@ -19,6 +19,7 @@ import forge.game.player.DelayedReveal;
 import forge.game.player.IHasIcon;
 import forge.game.player.PlayerView;
 import forge.game.spellability.SpellAbilityView;
+import forge.gamemodes.match.Selection;
 import forge.gamemodes.net.NetworkGuiGame;
 import forge.item.PaperCard;
 import forge.localinstance.skin.FSkinProp;
@@ -367,6 +368,9 @@ final class AgentGuiGame extends NetworkGuiGame {
     public void openView(final TrackableCollection<PlayerView> myPlayers) {
         this.myPlayers = myPlayers;
         gameFinished = false;
+        // The host starts each game believing we hold no selection and sends one only when it changes, so what
+        // a prompt offered when the last game ended would stay, with card ids the new game does not have.
+        setSelection(Selection.NONE);
         messages.clear();
         gamesOpened++;
         changed();
