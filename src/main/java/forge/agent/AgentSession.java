@@ -815,6 +815,10 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         m.put("damage", cv.getDamage());
         m.put("token", cv.isToken());
         m.put("faceDown", cv.isFaceDown());
+        if (cv.isPhasedOut()) {
+            // Still listed in its zone, but treated as though it does not exist until it phases in.
+            m.put("phasedOut", true);
+        }
         final CardStateView st = cv.getCurrentState();
         if (st != null) {
             m.put("type", String.valueOf(st.getType()));

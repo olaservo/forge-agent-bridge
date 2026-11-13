@@ -524,8 +524,8 @@ public class AgentSoakTest {
         final Map<String, String> players = new TreeMap<>();
         for (final Player p : game.getPlayers()) {
             final Set<String> field = new TreeSet<>();
-            for (final Card c : p.getCardsIn(ZoneType.Battlefield)) {
-                field.add(c.getId() + (c.isTapped() ? "T" : ""));
+            for (final Card c : p.getCardsIn(ZoneType.Battlefield, false)) { // false: phased-out cards too, as the bridge lists them
+                field.add(c.getId() + (c.isTapped() ? "T" : "") + (c.isPhasedOut() ? "P" : ""));
             }
             players.put(p.getName(), "life " + p.getLife() + " hand " + p.getCardsIn(ZoneType.Hand).size() + " library "
                     + p.getCardsIn(ZoneType.Library).size() + " graveyard " + p.getCardsIn(ZoneType.Graveyard).size() + " field " + field);
@@ -543,7 +543,8 @@ public class AgentSoakTest {
             final JsonObject p = e.getAsJsonObject();
             final Set<String> field = new TreeSet<>();
             for (final JsonElement c : p.getAsJsonArray("battlefield")) {
-                field.add(c.getAsJsonObject().get("id").getAsInt() + (c.getAsJsonObject().get("tapped").getAsBoolean() ? "T" : ""));
+                field.add(c.getAsJsonObject().get("id").getAsInt() + (c.getAsJsonObject().get("tapped").getAsBoolean() ? "T" : "")
+                        + (c.getAsJsonObject().has("phasedOut") ? "P" : ""));
             }
             players.put(p.get("name").getAsString(), "life " + p.get("life").getAsInt() + " hand " + p.get("handSize").getAsInt() + " library "
                     + p.get("librarySize").getAsInt() + " graveyard " + p.get("graveyardSize").getAsInt() + " field " + field);
