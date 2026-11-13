@@ -172,7 +172,7 @@ public class AgentGameTest {
                 final JsonArray choices = new JsonArray();
                 final String kind = d.get("kind").getAsString();
                 String text = null;
-                if ("text".equals(kind) || "number".equals(kind)) {
+                if ("text".equals(kind) || "number".equals(kind) || "assign".equals(kind)) {
                     text = d.get("default").isJsonNull() ? "0" : d.get("default").getAsString();
                 } else {
                     final int min = d.get("min").getAsInt();
@@ -212,8 +212,8 @@ public class AgentGameTest {
                 http.post("/game/act", BridgeHttp.body("action", "cancel"));
             } else if (System.currentTimeMillis() - lastCardSelect > 2_000) {
                 // A prompt that accepts only some cards says which in selection (a discard of the highest mana value).
-                final JsonObject card = g.has("selection")
-                        ? g.getAsJsonObject("selection").getAsJsonArray("cards").get(0).getAsJsonObject() : firstCardInHand(g);
+                final JsonArray offered = g.has("selection") ? g.getAsJsonObject("selection").getAsJsonArray("cards") : new JsonArray();
+                final JsonObject card = offered.isEmpty() ? firstCardInHand(g) : offered.get(0).getAsJsonObject();
                 if (card != null) {
                     actions++;
                     lastCardSelect = System.currentTimeMillis();
