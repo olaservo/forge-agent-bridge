@@ -1,5 +1,7 @@
 package forge.agent;
 
+import java.io.File;
+
 import com.google.gson.JsonObject;
 
 import forge.gui.GuiBase;
@@ -60,7 +62,8 @@ public final class AgentMain {
             seat.addProperty("host", autoJoin.substring(0, colon));
             seat.addProperty("port", Integer.parseInt(autoJoin.substring(colon + 1)));
             seat.addProperty("name", autoJoinName);
-            seat.addProperty("deck", autoJoinDeck);
+            final boolean isFile = autoJoinDeck != null && new File(autoJoinDeck).isFile();
+            seat.addProperty(isFile ? "deckFile" : "deck", autoJoinDeck);
         }
 
         final AgentBridge bridge = new AgentBridge();

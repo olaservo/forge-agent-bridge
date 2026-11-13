@@ -29,6 +29,7 @@ import forge.model.FModel;
 public class AgentAutoJoinTest {
 
     private static final long INTERVAL_MILLIS = 300;
+    private static final String PRECON_FILE = "res/quest/precons/Azorius Advance.dck";
     private static final String DECK = String.join("\n",
             "[metadata]",
             "Name=Agent Auto-Join Test",
@@ -75,7 +76,11 @@ public class AgentAutoJoinTest {
                 BridgeHttp.body("port", hostPort, "name", "SitBot", "deck", "no deck has this name"));
         assertTrue(err.get("error").getAsString().contains("no deck named"), "unknown deck is an error: " + err);
         Thread.sleep(500);
-        assertEquals(lobby.getSlot(1).getType(), LobbySlotType.OPEN, "a bad deck name takes no seat");
+        final JsonObject noFile = http.postExpectingError("/sit",
+                BridgeHttp.body("port", hostPort, "name", "SitBot", "deckFile", "res/quest/precons/no such file.dck"));
+        assertTrue(noFile.get("error").getAsString().contains("no deck file"), "a missing deck file is an error: " + noFile);
+        Thread.sleep(500);
+        assertEquals(lobby.getSlot(1).getType(), LobbySlotType.OPEN, "a bad deck takes no seat");
 
         JsonObject st = http.post("/sit", BridgeHttp.body("port", hostPort, "name", "SitBot"));
         assertEquals(st.getAsJsonObject("lobby").get("mySlot").getAsInt(), 1, "the answer already has the slot: " + st);
@@ -85,10 +90,13 @@ public class AgentAutoJoinTest {
 
         http.post("/disconnect", new JsonObject());
         AgentGameTest.waitFor("the host sees the seat leave", 10_000, () -> lobby.getSlot(1).getType() == LobbySlotType.OPEN);
-        st = http.post("/sit", BridgeHttp.body("port", hostPort, "name", "SitBot", "dck", DECK));
+        // A deck that ships with Forge, by its path under the working directory
+        st = http.post("/sit", BridgeHttp.body("port", hostPort, "name", "SitBot", "deckFile", PRECON_FILE));
         final JsonObject mine = st.getAsJsonObject("lobby").getAsJsonArray("slots").get(1).getAsJsonObject();
         assertTrue(mine.get("ready").getAsBoolean(), "the answer already shows the seat ready: " + st);
         assertTrue(seatedAndReady(), "the host has the deck and the ready flag");
+        assertEquals(lobby.getSlot(1).getDeck().getName(), "Azorius Advance");
+        assertEquals(lobby.getSlot(1).getDeck().getMain().countAll(), 60);
 
         // The lobby has two seats and SitBot holds the second
         final AgentBridge second = new AgentBridge();

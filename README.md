@@ -50,7 +50,7 @@ Start with `--auto-pass <mode>`, or switch during a game with `POST /game/yield 
 
 ## Auto-join
 
-Off by default. With `--auto-join <host>:<port>` the bridge checks the host's port every 5 seconds and sits down when a lobby appears there: it connects as `--auto-join-name` (default `Agent`), sends the deck named by `--auto-join-deck` and readies. The deck is looked up by name in Forge's `constructed` and `network-events` deck folders. Without a deck it takes the seat and stays unready, so the caller picks a deck and readies.
+Off by default. With `--auto-join <host>:<port>` the bridge checks the host's port every 5 seconds and sits down when a lobby appears there: it connects as `--auto-join-name` (default `Agent`), sends the deck given by `--auto-join-deck` and readies. The deck is a path to a `.dck` file, or a name looked up in Forge's `constructed` and `network-events` deck folders, which belong to the user's profile. A relative path is read from the folder that holds `res`, so a deck that ships with Forge works on any install, for example `res/quest/precons/Azorius Advance.dck`. Without a deck it takes the seat and stays unready, so the caller picks a deck and readies.
 
 ```
 ... forge.agent.AgentMain --port 36744 --auto-join 127.0.0.1:36743 --auto-join-name Claude --auto-join-deck "My Deck"
@@ -68,7 +68,7 @@ All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 
 - `GET /status`: everything about the seat. `GET /wait?since=<revision>&timeout=<seconds>` blocks until the revision passes `since`.
 - `POST /connect {host, port, name}`, `POST /disconnect`
-- `POST /sit {host, port, name, deck}` or `{..., dck}`: connect, wait for the slot and, with a deck, send it and ready. Answers like `/status`, with the slot assigned. An unknown deck name fails before a seat is taken.
+- `POST /sit {host, port, name, deck}`, `{..., deckFile}` or `{..., dck}`: connect, wait for the slot and, with a deck, send it and ready. `deck` is a name, `deckFile` a path to a `.dck` file, `dck` the file's text. Answers like `/status`, with the slot assigned. An unknown deck fails before a seat is taken.
 - `POST /lobby/ready {ready}`, `POST /lobby/avatar {index}`, `POST /lobby/deck {name}` or `{dck}`
 - `POST /chat {text}`
 - `GET /draft/pack`, `POST /draft/pick {card}`, `GET /draft/pool`

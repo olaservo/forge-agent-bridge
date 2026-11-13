@@ -1,5 +1,6 @@
 package forge.agent;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -163,10 +164,26 @@ public final class AgentBridge {
     Map<String, Object> sit(final JsonObject body) throws InterruptedException {
         final String deckName = optStr(body, "deck");
         final String dck = optStr(body, "dck");
-        // A bad deck name fails here, before a seat is taken
-        final Deck deck = deckName == null && dck == null ? null : resolveDeck(deckName, dck);
+        final String deckFile = optStr(body, "deckFile");
+        // A bad deck fails here, before a seat is taken
+        final Deck deck;
+        if (deckFile != null) {
+            deck = readDeckFile(deckFile);
+        } else {
+            deck = deckName == null && dck == null ? null : resolveDeck(deckName, dck);
+        }
         final int port = body.has("port") ? body.get("port").getAsInt() : 36743;
         return session.sit(str(body, "host", "127.0.0.1"), port, str(body, "name", "Agent"), deck);
+    }
+
+    /** A relative path is read from the working directory, the folder that holds Forge's res. */
+    private static Deck readDeckFile(final String path) {
+        final File file = new File(path);
+        final Deck deck = file.isFile() ? DeckSerializer.fromFile(file) : null;
+        if (deck == null) {
+            throw new IllegalArgumentException("no deck file at '" + file.getAbsolutePath() + "'");
+        }
+        return deck;
     }
 
     private Deck resolveDeck(final String name, final String text) {
