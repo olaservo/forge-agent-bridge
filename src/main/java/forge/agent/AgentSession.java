@@ -708,8 +708,11 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         if (!full) {
             return m;
         }
+        // The game view arrives a moment before the host fills it in. Until then its players and stack are null.
+        final FCollectionView<PlayerView> seats = gv.getPlayers();
+        final FCollectionView<StackItemView> items = gv.getStack();
         final List<Map<String, Object>> players = new ArrayList<>();
-        for (final PlayerView p : gv.getPlayers()) {
+        for (final PlayerView p : seats == null ? List.<PlayerView>of() : seats) {
             final Map<String, Object> pm = new LinkedHashMap<>();
             pm.put("id", p.getId());
             pm.put("name", p.getName());
@@ -729,7 +732,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
         m.put("players", players);
         final List<Map<String, Object>> stack = new ArrayList<>();
-        for (final StackItemView si : gv.getStack()) {
+        for (final StackItemView si : items == null ? List.<StackItemView>of() : items) {
             final Map<String, Object> sm = new LinkedHashMap<>();
             sm.put("id", si.getId());
             sm.put("source", si.getSourceCard() == null ? null : si.getSourceCard().getName());
