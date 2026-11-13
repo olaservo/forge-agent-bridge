@@ -59,16 +59,16 @@ final class AgentGuiGame extends NetworkGuiGame {
 
     // ---- decisions ----
 
-    private <T> List<Integer> decide(final String kind, final String prompt, final List<String> options,
-            final int min, final int max, final String defaultAnswer) {
-        final PendingDecision d = new PendingDecision(decisionIds.incrementAndGet(), kind, prompt, options, min, max, defaultAnswer);
+    /** Parks this thread until the seat answers. False when interrupted. */
+    private boolean ask(final PendingDecision d) {
         pending = d;
         changed();
         try {
-            return d.await();
+            d.await();
+            return true;
         } catch (final InterruptedException e) {
             Thread.currentThread().interrupt();
-            return List.of();
+            return false;
         } finally {
             if (pending == d) {
                 pending = null;
@@ -77,16 +77,28 @@ final class AgentGuiGame extends NetworkGuiGame {
         }
     }
 
+    private List<Integer> decide(final String kind, final String prompt, final List<String> options,
+            final int min, final int max, final String defaultAnswer) {
+        final PendingDecision d = new PendingDecision(decisionIds.incrementAndGet(), kind, prompt, options, min, max, defaultAnswer);
+        return ask(d) ? d.indices() : List.of();
+    }
+
+    private static <T> List<String> labels(final List<T> choices, final FSerializableFunction<T, String> display) {
+        final List<String> out = new ArrayList<>();
+        if (choices != null) {
+            for (final T c : choices) {
+                out.add(display != null ? display.apply(c) : String.valueOf(c));
+            }
+        }
+        return out;
+    }
+
     private <T> List<T> pick(final String kind, final String prompt, final List<T> choices, final int min, final int max,
             final FSerializableFunction<T, String> display) {
         if (choices == null || choices.isEmpty()) {
             return new ArrayList<>();
         }
-        final List<String> labels = new ArrayList<>(choices.size());
-        for (final T c : choices) {
-            labels.add(display != null ? display.apply(c) : String.valueOf(c));
-        }
-        final List<Integer> idx = decide(kind, prompt, labels, min, Math.min(max, choices.size()), null);
+        final List<Integer> idx = decide(kind, prompt, labels(choices, display), min, Math.min(max, choices.size()), null);
         final List<T> out = new ArrayList<>();
         if (idx != null) {
             for (final int i : idx) {
@@ -111,15 +123,8 @@ final class AgentGuiGame extends NetworkGuiGame {
     public <T> List<T> getChoices(final String message, final int min, final int max, final List<T> choices,
             final List<T> selected, final FSerializableFunction<T, String> display) {
         if (min < 0 && max < 0) {
-            // A reveal: the host shows a list and expects nothing back. Asking the seat would park the host
-            // until it answered, and a reveal sent while the seat concedes kept the game from ending.
-            final List<String> shown = new ArrayList<>();
-            if (choices != null) {
-                for (final T c : choices) {
-                    shown.add(display != null ? display.apply(c) : String.valueOf(c));
-                }
-            }
-            messages.add("Revealed, " + message + ": " + String.join(", ", shown));
+            // A reveal: the host expects nothing back, and asking the seat would hold the host until it answered.
+            messages.add("Revealed, " + message + ": " + String.join(", ", labels(choices, display)));
             changed();
             return new ArrayList<>();
         }
@@ -130,8 +135,7 @@ final class AgentGuiGame extends NetworkGuiGame {
     public <T> OrderResult<T> order(final String title, final String top, final int remainingObjectsMin, final int remainingObjectsMax,
             final List<T> sourceChoices, final List<T> destChoices, final CardView referenceCard, final boolean sideboardingMode,
             final boolean showRememberCheckbox) {
-        // The host says how many may be left unchosen, -1 for any number. Scry asks this way for the cards to
-        // put on the bottom, so asking for all of them every time sent the whole scry to the bottom.
+        // The host says how many may be left unchosen, -1 for any number. Scry asks this way for the bottom cards.
         final int n = sourceChoices.size();
         final int min = remainingObjectsMax < 0 ? 0 : Math.max(0, n - remainingObjectsMax);
         final int max = remainingObjectsMin < 0 ? n : Math.max(min, n - remainingObjectsMin);
@@ -164,9 +168,8 @@ final class AgentGuiGame extends NetworkGuiGame {
     @Override
     public List<CardView> manipulateCardList(final String title, final Iterable<CardView> cards, final Iterable<CardView> manipulable,
             final boolean toTop, final boolean toBottom, final boolean toAnywhere) {
-        // A host with "select from card displays" on (the desktop default) sends scry and surveil here: cards is
-        // the whole library and manipulable the cards looked at. The host reads the answer as the library in its
-        // new order, the cards kept on top first and the ones sent to the bottom last.
+        // A desktop host sends scry here: cards is the whole library, manipulable the cards looked at.
+        // The answer is the library in its new order.
         final List<CardView> all = Lists.newArrayList(cards);
         final List<CardView> looked = Lists.newArrayList(manipulable);
         if (looked.isEmpty()) {
@@ -214,27 +217,16 @@ final class AgentGuiGame extends NetworkGuiGame {
             final List<String> inputOptions, final boolean isNumeric) {
         final PendingDecision d = new PendingDecision(decisionIds.incrementAndGet(), isNumeric ? "number" : "text",
                 title + ": " + message, inputOptions == null ? List.of() : inputOptions, 0, 0, initialInput);
-        pending = d;
-        changed();
-        try {
-            final String text = d.awaitText();
-            return text == null ? (initialInput == null ? "" : initialInput) : text;
-        } catch (final InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return initialInput == null ? "" : initialInput;
-        } finally {
-            if (pending == d) {
-                pending = null;
-            }
-            changed();
+        final String text = ask(d) ? d.text() : null;
+        if (text != null) {
+            return text;
         }
+        return initialInput == null ? "" : initialInput;
     }
 
     /**
-     * Divides combat damage without asking: lethal damage to each creature in the order given, and what is left
-     * to the defending player if the assigning creature has trample, otherwise to the first creature. The host
-     * treats a null answer as "assign another creature first" and asks again, so null stalls the game when this
-     * is the only creature left to assign.
+     * Divides combat damage without asking: lethal to each blocker in order, the rest to the defender with trample,
+     * otherwise to the first blocker. Never null: the host asks again on null, which stalls the game.
      */
     @Override
     public Map<CardView, Integer> assignCombatDamage(final CardView attacker, final List<CardView> blockers, final int damage,
@@ -337,8 +329,7 @@ final class AgentGuiGame extends NetworkGuiGame {
 
     @Override
     public void showPromptMessage(final PlayerView playerView, final String message, final CardView card) {
-        // The host's awaitNextInput arms a 250 ms timer that replaces the prompt with "Waiting for ..." and
-        // disables the buttons; the desktop cancels it when the real prompt arrives, and so must we.
+        // Cancels the host's 250 ms timer that would replace this prompt with "Waiting for ...", as the desktop does.
         cancelAwaitNextInput();
         promptMessage = message == null ? "" : message;
         promptCard = card;

@@ -7,7 +7,7 @@ import forge.model.FModel;
 /**
  * A headless Forge network client behind a local HTTP JSON API, for forge-mcp-server. Runs until killed.
  * Start it with Forge's own jar on the classpath, from the folder that holds Forge's {@code res}:
- * {@code java -cp <forge jar><path separator><this jar> forge.agent.AgentMain [--port N] [--auto-pass off|opponent-turns|always]}.
+ * {@code java -cp <this jar><path separator><forge jar> forge.agent.AgentMain [--port N] [--auto-pass off|opponent-turns|always]}.
  */
 public final class AgentMain {
 

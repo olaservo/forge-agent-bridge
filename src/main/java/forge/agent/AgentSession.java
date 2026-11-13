@@ -9,6 +9,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 
 import forge.deck.Deck;
+import forge.deck.DeckSection;
 import forge.game.GameLogEntry;
 import forge.game.GameView;
 import forge.game.phase.PhaseType;
@@ -28,6 +29,7 @@ import forge.gamemodes.net.EventParticipant;
 import forge.gamemodes.net.client.ClientGameLobby;
 import forge.gamemodes.net.client.FGameClient;
 import forge.gamemodes.net.event.DraftPickEvent;
+import forge.gamemodes.net.event.MessageEvent;
 import forge.gamemodes.net.event.UpdateLobbyPlayerEvent;
 import forge.gui.interfaces.IDraftEventHandler;
 import forge.interfaces.IGameController;
@@ -76,19 +78,28 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private volatile String poolPath;
 
     /**
-     * When the host passes priority for our seat because it has no available actions (Forge's own setting).
-     * Forge's check looks at the hand, the battlefield and flashback cards only, so it misses a cast or an
-     * ability from the graveyard. On our own turn that skipped a main phase with legal plays, so the default
-     * applies the setting during opponents' turns only.
+     * When the host passes priority for our seat because it has no available actions. Forge's check misses
+     * casts and abilities from the graveyard, so the default is opponents' turns only. See the README.
      */
     static final String AUTO_PASS_OFF = "off";
     static final String AUTO_PASS_OPPONENT_TURNS = "opponent-turns";
     static final String AUTO_PASS_ALWAYS = "always";
     private volatile String autoPass = AUTO_PASS_OPPONENT_TURNS;
-    private volatile int yieldSentForGame;
+    /** The setting last sent to the host, and the game it was sent for. */
     private volatile boolean yieldSent;
-    /** The game turn on which we pressed End Turn on our own turn, or -1. We are done with that turn. */
+    private volatile int yieldSentForGame;
+    /** The turn of ours on which we pressed End Turn, or -1. */
     private volatile int endedTurn = -1;
+
+    private static final long ACT_FIRST_REACTION_MILLIS = 1500;
+    private static final long ACT_QUIET_MILLIS = 400;
+    private static final long ACT_SETTLE_MILLIS = 3000;
+    /** No action is sent this soon after switching auto-pass on. */
+    private static final long YIELD_ON_GAP_MILLIS = 750;
+    private final Object actLock = new Object();
+    private volatile long lastYieldOnAt;
+    private volatile boolean acting;
+    private volatile Thread actingThread;
 
     long revision() {
         return revision.get();
@@ -201,7 +212,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     }
 
     void sendChat(final String text) {
-        requireClient().send(new forge.gamemodes.net.event.MessageEvent(text));
+        requireClient().send(new MessageEvent(text));
     }
 
     // ---- IDraftEventHandler ----
@@ -294,9 +305,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
         final PhaseType phase = gv.getPhase();
         if (gv.getPlayerTurn().getId() == me.getId()) {
-            // On once we have pressed End Turn, or in our cleanup step where nobody gets priority, so that it is
-            // in place for the opponent's upkeep. Sent only at the opponent's turn, it arrives after the host has
-            // already asked us.
+            // On from End Turn or our cleanup step, so it is in place by the opponent's upkeep.
             return phase == PhaseType.CLEANUP || gv.getTurn() == endedTurn;
         }
         // Switch off before the opponent's turn ends, so the setting has reached the host by our main phase.
@@ -377,11 +386,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     }
 
     /**
-     * Sends one controller call and returns once the host has reacted and gone quiet for
-     * {@code ACT_QUIET_MILLIS}, or after {@code ACT_FIRST_REACTION_MILLIS} with no reaction, capped at
-     * {@code ACT_SETTLE_MILLIS}. The host runs each call from a client on its own thread, so two calls
-     * sent back to back can overlap there; a desktop player's clicks never do. Waiting for the
-     * reaction to settle spaces them the same way.
+     * Sends one controller call and returns once the host has reacted and gone quiet. The host runs each
+     * call on its own thread, so two sent back to back can overlap there. Waiting spaces them like clicks.
      */
     void act(final String action, final Integer id, final Integer color) throws InterruptedException {
         synchronized (actLock) {
@@ -412,16 +418,6 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
     }
 
-    private static final long ACT_FIRST_REACTION_MILLIS = 1500;
-    private static final long ACT_QUIET_MILLIS = 400;
-    private static final long ACT_SETTLE_MILLIS = 3000;
-    /** No action is sent this soon after switching auto-pass on. */
-    private static final long YIELD_ON_GAP_MILLIS = 750;
-    private volatile long lastYieldOnAt;
-    private volatile boolean acting;
-    private volatile Thread actingThread;
-    private final Object actLock = new Object();
-
     private void send(final String action, final Integer id, final Integer color) {
         final IGameController c = controller();
         final GameView gv = gui.getGameView();
@@ -438,10 +434,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
         sendAction(c, action, id, color);
         if (endsTurn >= 0) {
-            // Switch auto-pass on for the opponent's turn now, AFTER the click. Switching it on makes the host
-            // recompute our available actions on a network thread if our priority prompt is still up. Sent
-            // before the click, that sweep ran while the click resumed the game thread, and the host died with
-            // a ConcurrentModificationException. After the click there is no prompt of ours for it to sweep.
+            // Auto-pass goes on after the click. Sent while our prompt is still up, it makes the host recompute
+            // our actions on a network thread while the click resumes the game thread, and the host died with a
+            // ConcurrentModificationException.
             endedTurn = endsTurn;
             sendYieldPrefs(false);
         }
@@ -581,9 +576,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         // Forge delivers a drafted pool with every pick in the Sideboard section and an empty Main.
         m.put("size", d.getAllCardsInASinglePool().countAll());
         m.put("mainSize", d.getMain().countAll());
-        m.put("sideboardSize", d.has(forge.deck.DeckSection.Sideboard) ? d.get(forge.deck.DeckSection.Sideboard).countAll() : 0);
+        m.put("sideboardSize", d.has(DeckSection.Sideboard) ? d.get(DeckSection.Sideboard).countAll() : 0);
         final List<Map<String, Object>> cards = new ArrayList<>();
-        for (final forge.deck.DeckSection section : forge.deck.DeckSection.values()) {
+        for (final DeckSection section : DeckSection.values()) {
             if (!d.has(section)) {
                 continue;
             }

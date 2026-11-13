@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -31,13 +32,13 @@ import forge.model.FModel;
 public final class AgentBridge {
 
     private final AgentSession session = new AgentSession();
+    private final Gson gson = new GsonBuilder().serializeNulls().disableHtmlEscaping().create();
+    private HttpServer server;
 
-    /** When the host passes priority for our seat if it has no available actions: off, opponent-turns or always. */
+    /** off, opponent-turns or always. */
     void setAutoPass(final String mode) {
         session.setAutoPass(mode);
     }
-    private final Gson gson = new GsonBuilder().serializeNulls().disableHtmlEscaping().create();
-    private HttpServer server;
 
     public void start(final int port) throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
@@ -129,13 +130,7 @@ public final class AgentBridge {
                 return session.gameSnapshot(false);
             }
             case "POST /game/yield":
-                if (body.has("autoPass")) {
-                    session.setAutoPass(body.get("autoPass").getAsString());
-                } else {
-                    // The first build took a boolean.
-                    final boolean on = !body.has("autoPassNoActions") || body.get("autoPassNoActions").getAsBoolean();
-                    session.setAutoPass(on ? AgentSession.AUTO_PASS_OPPONENT_TURNS : AgentSession.AUTO_PASS_OFF);
-                }
+                session.setAutoPass(str(body, "autoPass", null));
                 return session.gameSnapshot(false);
             case "POST /game/decide": {
                 final int id = body.get("id").getAsInt();
@@ -219,7 +214,7 @@ public final class AgentBridge {
         for (final String part : raw.split("&")) {
             final int eq = part.indexOf('=');
             if (eq > 0) {
-                m.put(part.substring(0, eq), java.net.URLDecoder.decode(part.substring(eq + 1), StandardCharsets.UTF_8));
+                m.put(part.substring(0, eq), URLDecoder.decode(part.substring(eq + 1), StandardCharsets.UTF_8));
             }
         }
         return m;
