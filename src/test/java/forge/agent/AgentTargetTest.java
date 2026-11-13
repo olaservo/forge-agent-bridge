@@ -16,11 +16,15 @@ import com.google.gson.JsonObject;
 
 /**
  * A target prompt says that a player can be chosen, and conceding with one open does not break the
- * host. The deck is 20 Mountain and 20 Shock. The agent casts a Shock, finds the opponent under
- * {@code selection.players}, targets it and the host's life total drops by two. It casts a second
- * Shock and concedes while that target prompt is open. Forge's target prompt asks again without
- * end once the game is over, and before the bridge cancelled the prompt first the host's game
- * thread died with a StackOverflowError.
+ * host. The agent's deck is 20 Mountain and 20 Shock, and the host AI plays cheap creatures. The
+ * agent casts a Shock, finds the opponent under {@code selection.players}, targets it and the
+ * host's life total drops by two. Once the host has a creature out, the agent casts another Shock
+ * and concedes while that target prompt is open.
+ *
+ * A soak game once ended with a StackOverflowError on the host after a concession during
+ * targeting, in Forge's TargetSelection. The bridge now cancels the prompt before conceding. This
+ * test passes with or without that step: a one-target prompt has not reproduced the fault, so it
+ * guards the concession, not the fix.
  */
 public class AgentTargetTest {
 
@@ -51,7 +55,7 @@ public class AgentTargetTest {
         final Thread.UncaughtExceptionHandler before = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> uncaught.add(t.getName() + ": " + e));
         try {
-            match = new RiggedMatch(DECK);
+            match = new RiggedMatch(DECK, RiggedMatch.deck("Host creatures", "18 Forest", "11 Llanowar Elves", "11 Grizzly Bears"));
             final int lifeAtStart = match.hostLife(RiggedMatch.HOST);
             boolean shocked = false;
             final long deadline = System.currentTimeMillis() + 240_000;
@@ -62,7 +66,8 @@ public class AgentTargetTest {
                 if (!shocked && match.hostLife(RiggedMatch.HOST) <= lifeAtStart - 2) {
                     shocked = true;
                 }
-                final JsonArray players = g.has("selection") ? g.getAsJsonObject("selection").getAsJsonArray("players") : new JsonArray();
+                final JsonObject sel = g.has("selection") ? g.getAsJsonObject("selection") : null;
+                final JsonArray players = sel == null ? new JsonArray() : sel.getAsJsonArray("players");
                 if (players.isEmpty()) {
                     match.basics(g, "Mountain", "Shock", 1);
                 } else if (!shocked) {
@@ -74,12 +79,14 @@ public class AgentTargetTest {
                             offered = players.get(i).getAsJsonObject();
                         }
                     }
-                    assertTrue(offered != null, "the opponent is offered as a target: " + g.get("selection"));
+                    assertTrue(offered != null, "the opponent is offered as a target: " + sel);
                     assertEquals(offered.get("type").getAsString(), "player");
                     assertEquals(offered.get("name").getAsString(), RiggedMatch.HOST);
                     match.act("selectPlayer", offered.get("id").getAsInt());
+                } else if (sel.getAsJsonArray("cards").isEmpty()) {
+                    match.act("selectPlayer", RiggedMatch.player(g, false).get("id").getAsInt()); // the host has no creature yet
                 } else {
-                    break; // the second Shock's target prompt is open
+                    break; // a target prompt that offers a card is open
                 }
             }
             assertEquals(match.hostLife(RiggedMatch.HOST), lifeAtStart - 2, "the first Shock hit the player it was aimed at");
