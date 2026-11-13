@@ -112,7 +112,7 @@ public class AgentSoakTest {
     private int blocksShownBeforeOk;
     private int playerTargetsTried;
     private int playerTargetsAccepted;
-    /** What the bridge did for the seat without asking, counted from its messages: at least this many. */
+    /** What the bridge told the seat in messages without asking it anything: at least this many. */
     private final Map<String, Integer> doneForTheSeat = new TreeMap<>();
     private final Set<String> messagesSeen = new HashSet<>();
 
@@ -254,8 +254,7 @@ public class AgentSoakTest {
             }
             for (final JsonElement m : g.getAsJsonArray("messages")) {
                 final String text = m.getAsString();
-                final String what = text.startsWith("Combat damage assigned") ? "combat damage assigned"
-                        : text.startsWith("Divided ") ? "amount divided" : text.startsWith("Revealed, ") ? "reveal shown" : null;
+                final String what = text.startsWith("Split refused") ? "split refused" : text.startsWith("Revealed, ") ? "reveal shown" : null;
                 if (what != null && messagesSeen.add(index + ":" + text)) {
                     doneForTheSeat.merge(what, 1, Integer::sum);
                 }
@@ -436,7 +435,16 @@ public class AgentSoakTest {
         decisionKinds.merge(kind, 1, Integer::sum);
         final JsonArray choices = new JsonArray();
         String text = null;
-        if ("text".equals(kind) || "number".equals(kind)) {
+        if ("assign".equals(kind)) {
+            // Half the time the bridge's own split, half the time everything on the first option, which the
+            // bridge refuses when the rule forbids it.
+            final int n = d.getAsJsonArray("options").size();
+            final StringBuilder all = new StringBuilder(d.get("amount").getAsString());
+            for (int i = 1; i < n; i++) {
+                all.append(",0");
+            }
+            text = rnd.nextBoolean() ? d.get("default").getAsString() : all.toString();
+        } else if ("text".equals(kind) || "number".equals(kind)) {
             text = d.get("default").isJsonNull() || d.get("default").getAsString().isEmpty() ? "1" : d.get("default").getAsString();
         } else {
             final int n = d.getAsJsonArray("options").size();
@@ -683,7 +691,7 @@ public class AgentSoakTest {
         report.addProperty("blocksShownInCombatBeforeOk", blocksShownBeforeOk);
         report.addProperty("playerTargetsTried", playerTargetsTried);
         report.addProperty("playerTargetsAccepted", playerTargetsAccepted);
-        report.add("doneForTheSeatWithoutAsking", gson.toJsonTree(doneForTheSeat));
+        report.add("bridgeMessages", gson.toJsonTree(doneForTheSeat));
         report.add("decisionKinds", gson.toJsonTree(decisionKinds));
         report.add("hostInputs", gson.toJsonTree(hostInputs));
         report.add("prompts", gson.toJsonTree(prompts));
