@@ -40,6 +40,13 @@ public final class AgentBridge {
         session.setAutoPass(mode);
     }
 
+    /** Sits down at each lobby that appears on the host named in {@code seat}, a {@code POST /sit} body. */
+    void autoJoin(final JsonObject seat, final long intervalMillis) {
+        final Thread t = new Thread(new AutoJoin(this, session, seat, intervalMillis), "Agent-AutoJoin");
+        t.setDaemon(true);
+        t.start();
+    }
+
     public void start(final int port) throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         server.setExecutor(Executors.newCachedThreadPool(r -> {
@@ -99,6 +106,8 @@ public final class AgentBridge {
             case "POST /disconnect":
                 session.disconnect();
                 return session.status();
+            case "POST /sit":
+                return sit(body);
             case "POST /lobby/ready":
                 session.setReady(!body.has("ready") || body.get("ready").getAsBoolean());
                 return session.lobbySnapshot();
@@ -106,7 +115,7 @@ public final class AgentBridge {
                 session.setAvatar(body.get("index").getAsInt());
                 return session.lobbySnapshot();
             case "POST /lobby/deck": {
-                final Deck deck = resolveDeck(body);
+                final Deck deck = resolveDeck(optStr(body, "name"), optStr(body, "dck"));
                 session.setDeck(deck);
                 return Map.of("deck", deck.getName(), "size", deck.getMain().countAll());
             }
@@ -151,9 +160,17 @@ public final class AgentBridge {
         }
     }
 
-    private Deck resolveDeck(final JsonObject body) {
-        if (body.has("dck")) {
-            final String text = body.get("dck").getAsString();
+    Map<String, Object> sit(final JsonObject body) throws InterruptedException {
+        final String deckName = optStr(body, "deck");
+        final String dck = optStr(body, "dck");
+        // A bad deck name fails here, before a seat is taken
+        final Deck deck = deckName == null && dck == null ? null : resolveDeck(deckName, dck);
+        final int port = body.has("port") ? body.get("port").getAsInt() : 36743;
+        return session.sit(str(body, "host", "127.0.0.1"), port, str(body, "name", "Agent"), deck);
+    }
+
+    private Deck resolveDeck(final String name, final String text) {
+        if (text != null) {
             final Map<String, List<String>> sections = new LinkedHashMap<>();
             String current = "metadata";
             for (final String line : text.split("\\r?\\n")) {
@@ -167,13 +184,12 @@ public final class AgentBridge {
             }
             return DeckSerializer.fromSections(sections);
         }
-        if (!body.has("name") || body.get("name").isJsonNull()) {
+        if (name == null) {
             if (session.pool() != null) {
                 return session.pool();
             }
             throw new IllegalArgumentException("give a deck name, dck text, or draft a pool first");
         }
-        final String name = body.get("name").getAsString();
         for (final Deck d : FModel.getDecks().getNetworkEventDecks()) {
             if (d.getName().equalsIgnoreCase(name)) {
                 return d;
@@ -185,6 +201,10 @@ public final class AgentBridge {
             }
         }
         throw new IllegalArgumentException("no deck named '" + name + "' in network-events or constructed");
+    }
+
+    private static String optStr(final JsonObject o, final String key) {
+        return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
     }
 
     private static String str(final JsonObject o, final String key, final String dflt) {

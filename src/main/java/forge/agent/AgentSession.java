@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 
 import forge.deck.Deck;
 import forge.deck.DeckSection;
@@ -59,6 +60,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private volatile boolean connected;
     private volatile String closeReason;
 
+    private static final long SEAT_WAIT_MILLIS = 10_000;
     private volatile GameLobbyData lobbyData;
     private volatile int mySlot = -1;
     final List<String> chat = new CopyOnWriteArrayList<>();
@@ -166,6 +168,55 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             throw new IllegalStateException("not connected");
         }
         return c;
+    }
+
+    /** True for a connection we hold, and for one Forge's client is still retrying. */
+    boolean seatAlive() {
+        final FGameClient c = client;
+        if (c == null || !connected) {
+            return false;
+        }
+        final FGameClient.ReconnectState state = c.getReconnectState();
+        return state != FGameClient.ReconnectState.FAILED && state != FGameClient.ReconnectState.SEAT_LOST;
+    }
+
+    /**
+     * Connects, waits for the host to give a slot and, with a deck, sends it and readies. Without a deck the
+     * seat is left unready.
+     */
+    synchronized Map<String, Object> sit(final String host0, final int port0, final String name0, final Deck deck)
+            throws InterruptedException {
+        connect(host0, port0, name0);
+        awaitUntil(() -> mySlot >= 0 || !connected, SEAT_WAIT_MILLIS);
+        if (mySlot < 0 || !connected) {
+            disconnect();
+            throw new IllegalStateException("the host at " + host0 + ":" + port0
+                    + " gave no seat; its lobby is full or a match is running");
+        }
+        if (deck != null) {
+            // The host starts only when it has seen both, and it reads them in the order sent
+            setDeck(deck);
+            setReady(true);
+            awaitUntil(this::readyOnHost, SEAT_WAIT_MILLIS);
+        }
+        return status();
+    }
+
+    private boolean readyOnHost() {
+        final int slot = mySlot;
+        return lobbyData != null && slot >= 0 && slot < lobby.getNumberOfSlots() && lobby.getSlot(slot).isReady();
+    }
+
+    private void awaitUntil(final BooleanSupplier done, final long timeoutMillis) throws InterruptedException {
+        final long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (true) {
+            final long seen = revision.get();
+            final long left = deadline - System.currentTimeMillis();
+            if (done.getAsBoolean() || left <= 0) {
+                return;
+            }
+            awaitChange(seen, left);
+        }
     }
 
     // ---- ILobbyListener ----

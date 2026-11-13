@@ -48,12 +48,27 @@ Start with `--auto-pass <mode>`, or switch during a game with `POST /game/yield 
 
 `always` is not safe. Forge decides "no available actions" by looking at the hand, the battlefield and flashback cards (`forge.ai.AvailableActions`). It does not look at other graveyard casts or abilities, and it does not count mana from a graveyard ability. In a live game on 2026-11-11 that skipped the seat's main phase while it could cast a card with disturb from its graveyard. On an opponent's turn the same gap can still hide an instant-speed play from the graveyard. Declaring attackers and blockers and answering choices are separate prompts and are still asked in every mode.
 
+## Auto-join
+
+Off by default. With `--auto-join <host>:<port>` the bridge checks the host's port every 5 seconds and sits down when a lobby appears there: it connects as `--auto-join-name` (default `Agent`), sends the deck named by `--auto-join-deck` and readies. The deck is looked up by name in Forge's `constructed` and `network-events` deck folders. Without a deck it takes the seat and stays unready, so the caller picks a deck and readies.
+
+```
+... forge.agent.AgentMain --port 36744 --auto-join 127.0.0.1:36743 --auto-join-name Claude --auto-join-deck "My Deck"
+```
+
+- It takes the first Open slot, whoever that slot was meant for. Leave it off when another player is joining.
+- It tries once per lobby. After the seat ends, or the host refuses it because the lobby is full or a match is running, it waits until the host's port has closed before it tries again. A seat that leaves is not put back while the same lobby stays up.
+- It readies only when it sits down. After a match the host unreadies every seat, and readying for the next match is the caller's choice.
+- A seat taken through `POST /connect` or `POST /sit` is left alone.
+- Each check while a lobby is up and the bridge is not seated opens and closes a connection, which the host logs as an unregistered peer.
+
 ## HTTP API
 
 All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 
 - `GET /status`: everything about the seat. `GET /wait?since=<revision>&timeout=<seconds>` blocks until the revision passes `since`.
 - `POST /connect {host, port, name}`, `POST /disconnect`
+- `POST /sit {host, port, name, deck}` or `{..., dck}`: connect, wait for the slot and, with a deck, send it and ready. Answers like `/status`, with the slot assigned. An unknown deck name fails before a seat is taken.
 - `POST /lobby/ready {ready}`, `POST /lobby/avatar {index}`, `POST /lobby/deck {name}` or `{dck}`
 - `POST /chat {text}`
 - `GET /draft/pack`, `POST /draft/pick {card}`, `GET /draft/pool`
