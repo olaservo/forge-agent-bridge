@@ -13,7 +13,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
+import forge.deck.Deck;
 import forge.deck.DeckgenUtil;
+import forge.deck.io.DeckSerializer;
 import forge.game.card.Card;
 import forge.game.player.Player;
 import forge.game.zone.ZoneType;
@@ -65,8 +67,18 @@ final class RiggedMatch {
         }
     }
 
-    /** Hosts, seats the agent with this deck, starts the game and waits until the agent is in it. */
+    /** The host AI plays a random deck. */
     RiggedMatch(final String deck) throws Exception {
+        this(deck, null);
+    }
+
+    /** A deck from lines like "20 Forest", for the host AI. */
+    static Deck deck(final String name, final String... main) {
+        return DeckSerializer.fromSections(Map.of("metadata", List.of("Name=" + name), "main", List.of(main)));
+    }
+
+    /** Hosts, seats the agent with this deck, starts the game and waits until the agent is in it. */
+    RiggedMatch(final String deck, final Deck hostDeck) throws Exception {
         final int hostPort = freePort();
         server.startServer(hostPort);
         server.setLobby(lobby);
@@ -82,7 +94,7 @@ final class RiggedMatch {
         });
         final LobbySlot hostSlot = lobby.getSlot(0);
         hostSlot.setType(LobbySlotType.AI);
-        hostSlot.setDeck(DeckgenUtil.getRandomColorDeck(true));
+        hostSlot.setDeck(hostDeck == null ? DeckgenUtil.getRandomColorDeck(true) : hostDeck);
         hostSlot.setIsReady(true);
         lobby.setLimitedMode(true);
 
