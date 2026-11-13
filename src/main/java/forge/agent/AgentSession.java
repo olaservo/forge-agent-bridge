@@ -39,7 +39,9 @@ import forge.item.PaperCard;
 import forge.localinstance.properties.ForgeConstants;
 import forge.localinstance.properties.ForgePreferences.FPref;
 import forge.model.FModel;
+import forge.trackable.TrackableObject;
 import forge.trackable.TrackableTypes;
+import forge.util.collect.FCollection;
 import forge.util.collect.FCollectionView;
 
 /**
@@ -502,13 +504,37 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             case "useMana" -> c.useMana((byte) (int) color);
             case "alphaStrike" -> c.alphaStrike();
             case "undo" -> c.undoLastAction();
-            case "concede" -> c.concede();
+            case "concede" -> {
+                cancelSelection(c);
+                c.concede();
+            }
             case "quit" -> c.nextGameDecision(NextGameDecision.QUIT);
             case "continue" -> c.nextGameDecision(NextGameDecision.CONTINUE);
             case "newMatch" -> c.nextGameDecision(NextGameDecision.NEW);
             default -> throw new IllegalArgumentException("unknown action " + action);
         }
     }
+
+    /**
+     * Backs out of a prompt that is choosing cards or targets before conceding. Forge's target prompt asks
+     * again after the game is over, without end, and the host's game thread died with a StackOverflowError
+     * when the seat conceded with one open.
+     */
+    private void cancelSelection(final IGameController c) {
+        final Selection sel = gui.getSelection();
+        if (!gui.cancelEnabled || sel == null || (sel.cards().isEmpty() && sel.targets().isEmpty())) {
+            return;
+        }
+        final long seen = revision.get();
+        c.selectButtonCancel();
+        try {
+            awaitChange(seen, CANCEL_BEFORE_CONCEDE_MILLIS);
+        } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static final long CANCEL_BEFORE_CONCEDE_MILLIS = 1000;
 
     boolean decide(final int id, final List<Integer> indices, final String text) {
         return gui.answer(id, indices, text);
@@ -688,6 +714,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             dm.put("min", d.min);
             dm.put("max", d.max);
             dm.put("default", d.defaultAnswer);
+            if (d.amount != null) {
+                dm.put("amount", d.amount);
+            }
             m.put("pendingDecision", dm);
         }
         m.put("messages", tail(gui.messages, 10));
@@ -749,33 +778,59 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
                 am.put("attacker", a.getName());
                 am.put("attackerId", a.getId());
                 am.put("defender", combat.getDefender(a) == null ? null : combat.getDefender(a).getName());
+                // The host lists blockers as declared only once the block is final. Until then they are planned.
+                final FCollection<CardView> declared = combat.getBlockers(a);
+                final FCollection<CardView> planned = combat.getPlannedBlockers(a);
                 final List<String> blockers = new ArrayList<>();
-                if (combat.getBlockers(a) != null) {
-                    for (final CardView b : combat.getBlockers(a)) {
-                        blockers.add(b.getName() + "#" + b.getId());
-                    }
+                for (final CardView b : declared != null && !declared.isEmpty() ? declared : planned == null ? List.<CardView>of() : planned) {
+                    blockers.add(b.getName() + "#" + b.getId());
                 }
                 am.put("blockers", blockers);
+                am.put("blocked", declared != null && !declared.isEmpty());
                 attacks.add(am);
             }
             m.put("combat", attacks);
         }
-        // Cards the current prompt offers, including ones in zones the state does not list (a library search).
+        // What the current prompt accepts: cards, including ones in zones the state does not list (a library
+        // search), and players. "chosen" is what is picked so far, or the attacker being blocked.
         final Selection sel = gui.getSelection();
-        if (sel != null && !sel.cards().isEmpty()) {
-            final Map<String, Object> sm = new LinkedHashMap<>();
-            sm.put("min", sel.min());
-            sm.put("max", sel.max());
+        if (sel != null) {
             final List<Map<String, Object>> offered = new ArrayList<>();
             for (final CardView cv : sel.cards()) {
                 if (cv != null) {
                     offered.add(describe(cv));
                 }
             }
-            sm.put("cards", offered);
-            m.put("selection", sm);
+            final List<Map<String, Object>> targetPlayers = entities(sel.targets(), true);
+            final List<Map<String, Object>> chosen = entities(sel.chosen(), false);
+            if (!offered.isEmpty() || !targetPlayers.isEmpty() || !chosen.isEmpty()) {
+                final Map<String, Object> sm = new LinkedHashMap<>();
+                sm.put("min", sel.min());
+                sm.put("max", sel.max());
+                sm.put("cards", offered);
+                sm.put("players", targetPlayers);
+                sm.put("chosen", chosen);
+                m.put("selection", sm);
+            }
         }
         return m;
+    }
+
+    /** Players and cards among a selection's objects, as id, name and type. Stack items are left out. */
+    private static List<Map<String, Object>> entities(final List<TrackableObject> objects, final boolean playersOnly) {
+        final List<Map<String, Object>> out = new ArrayList<>();
+        for (final TrackableObject o : objects) {
+            final boolean player = o instanceof PlayerView;
+            if (!player && (playersOnly || !(o instanceof CardView))) {
+                continue;
+            }
+            final Map<String, Object> em = new LinkedHashMap<>();
+            em.put("type", player ? "player" : "card");
+            em.put("id", o.getId());
+            em.put("name", player ? ((PlayerView) o).getName() : ((CardView) o).getName());
+            out.add(em);
+        }
+        return out;
     }
 
     List<String> gameLog(final int since) {

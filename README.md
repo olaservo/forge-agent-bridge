@@ -72,7 +72,15 @@ All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 - `POST /lobby/ready {ready}`, `POST /lobby/avatar {index}`, `POST /lobby/deck {name}` or `{dck}`
 - `POST /chat {text}`
 - `GET /draft/pack`, `POST /draft/pick {card}`, `GET /draft/pool`
-- `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}`, `POST /game/yield {autoPass}`
+- `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}` or `{id, amounts}`, `POST /game/yield {autoPass}`
+
+What the seat is asked comes in three forms in the game state:
+
+- `buttons` and `prompt`: answer with the `ok` and `cancel` actions.
+- `selection`: the prompt accepts cards (`cards`, answered with `selectCard`) or players (`players`, answered with `selectPlayer`). `chosen` lists what is picked so far, and the attacker being blocked while declaring blockers.
+- `pendingDecision`: answer with `/game/decide`. `choices` holds option indices. For kind `assign`, which splits combat damage or a divided amount, send one number per option in `amounts`, or the same as comma-separated `text`; they must add up to the decision's `amount`. A split that breaks a rule is replaced by the bridge's `default` and a line in `messages` says so.
+
+`concede` first cancels an open prompt that selects cards or targets. Forge's target prompt asks again without end once the game is over, and the host's game thread died with a StackOverflowError when a seat conceded with one open.
 
 ## Test
 

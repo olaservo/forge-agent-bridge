@@ -150,7 +150,15 @@ public final class AgentBridge {
                         indices.add(e.getAsInt());
                     }
                 }
-                final String text = body.has("text") && !body.get("text").isJsonNull() ? body.get("text").getAsString() : null;
+                String text = body.has("text") && !body.get("text").isJsonNull() ? body.get("text").getAsString() : null;
+                if (body.has("amounts") && body.get("amounts").isJsonArray()) {
+                    // An "assign" decision: one number per option. Carried as text, which works as well.
+                    final List<String> amounts = new ArrayList<>();
+                    for (final JsonElement e : body.getAsJsonArray("amounts")) {
+                        amounts.add(String.valueOf(e.getAsInt()));
+                    }
+                    text = String.join(",", amounts);
+                }
                 if (!session.decide(id, indices, text)) {
                     throw new IllegalStateException("no pending decision with id " + id);
                 }

@@ -225,53 +225,120 @@ final class AgentGuiGame extends NetworkGuiGame {
         return initialInput == null ? "" : initialInput;
     }
 
-    /**
-     * Divides combat damage without asking: lethal to each blocker in order, the rest to the defender with trample,
-     * otherwise to the first blocker. Never null: the host asks again on null, which stalls the game.
-     */
-    @Override
-    public Map<CardView, Integer> assignCombatDamage(final CardView attacker, final List<CardView> blockers, final int damage,
-            final GameEntityView defender, final boolean overrideOrder, final boolean maySkip) {
-        final Map<CardView, Integer> assigned = new LinkedHashMap<>();
-        final CardStateView state = attacker.getCurrentState();
-        final boolean deathtouch = state != null && state.hasDeathtouch();
-        final boolean trample = state != null && state.hasTrample();
-        int left = damage;
-        for (final CardView blocker : blockers) {
-            if (left <= 0) {
-                break;
-            }
-            final int lethal = deathtouch ? 1 : Math.max(1, blocker.getLethalDamage());
-            final int given = Math.min(left, lethal);
-            assigned.put(blocker, given);
-            left -= given;
-        }
-        if (left > 0) {
-            if (blockers.isEmpty() || (trample && defender != null)) {
-                assigned.put(null, left); // a null key is the defender
-            } else {
-                assigned.merge(blockers.get(0), left, Integer::sum);
-            }
-        }
-        messages.add("Combat damage assigned for " + attacker + ": " + describe(assigned));
-        changed();
-        return assigned;
+    /** Says why a split is not allowed, or null when it is. */
+    private interface SplitRule {
+        String refuse(int[] split);
     }
 
-    private static String describe(final Map<CardView, Integer> assigned) {
-        final StringBuilder sb = new StringBuilder();
-        for (final Map.Entry<CardView, Integer> e : assigned.entrySet()) {
-            if (sb.length() > 0) {
-                sb.append(", ");
+    /**
+     * Asks the seat to split an amount among the options, as an "assign" decision answered with one number per
+     * option. With one option there is nothing to choose and the fallback is used. An answer that does not add
+     * up or breaks the rule is refused: the fallback is used and a message says why.
+     */
+    private int[] split(final String prompt, final List<String> options, final int amount, final int[] fallback, final SplitRule rule) {
+        if (options.size() < 2 || amount <= 0) {
+            return fallback;
+        }
+        final PendingDecision d = new PendingDecision(decisionIds.incrementAndGet(), "assign", prompt, options, 0, amount,
+                join(fallback), amount);
+        if (!ask(d)) {
+            return fallback;
+        }
+        String why;
+        final int[] answer = new int[options.size()];
+        try {
+            final String[] parts = d.text() == null ? new String[0] : d.text().trim().split("[,\\s]+");
+            int sum = 0;
+            why = parts.length == answer.length ? null : "expected " + answer.length + " numbers";
+            for (int i = 0; why == null && i < parts.length; i++) {
+                answer[i] = Integer.parseInt(parts[i]);
+                sum += answer[i];
+                if (answer[i] < 0) {
+                    why = "a negative number";
+                }
             }
-            sb.append(e.getValue()).append(" to ").append(e.getKey() == null ? "the defender" : e.getKey().toString());
+            if (why == null && sum != amount) {
+                why = "the numbers add up to " + sum + ", not " + amount;
+            }
+            if (why == null) {
+                why = rule.refuse(answer);
+            }
+        } catch (final NumberFormatException e) {
+            why = "not a list of numbers";
+        }
+        if (why == null) {
+            return answer;
+        }
+        messages.add("Split refused (" + why + "), used " + join(fallback) + " for: " + prompt);
+        changed();
+        return fallback;
+    }
+
+    private static String join(final int[] numbers) {
+        final StringBuilder sb = new StringBuilder();
+        for (final int n : numbers) {
+            sb.append(sb.length() > 0 ? "," : "").append(n);
         }
         return sb.toString();
     }
 
     /**
-     * Divides an amount (damage, counters, a shield) among targets without asking: one each first when every
-     * target needs at least one, and the rest to the first target.
+     * Asks the seat how an attacker's combat damage is split when it has more than one place to go: several
+     * blockers, or a blocker and the defender for an attacker with trample. The default is lethal to each
+     * blocker in order and the rest to the defender with trample, otherwise to the first blocker. Never
+     * null: the host asks again on null, which stalls the game.
+     */
+    @Override
+    public Map<CardView, Integer> assignCombatDamage(final CardView attacker, final List<CardView> blockers, final int damage,
+            final GameEntityView defender, final boolean overrideOrder, final boolean maySkip) {
+        final CardStateView state = attacker.getCurrentState();
+        final boolean deathtouch = state != null && state.hasDeathtouch();
+        final boolean trample = state != null && state.hasTrample();
+        final boolean toDefender = blockers.isEmpty() || (trample && defender != null);
+        final int n = blockers.size();
+        final int[] lethal = new int[n];
+        final int[] fallback = new int[n + (toDefender ? 1 : 0)];
+        final List<String> options = new ArrayList<>();
+        int left = damage;
+        for (int i = 0; i < n; i++) {
+            lethal[i] = deathtouch ? 1 : Math.max(1, blockers.get(i).getLethalDamage());
+            fallback[i] = Math.min(left, lethal[i]);
+            left -= fallback[i];
+            options.add(blockers.get(i) + ", lethal damage " + lethal[i]);
+        }
+        if (toDefender) {
+            fallback[n] = left;
+            options.add(defender == null ? "the defender" : String.valueOf(defender));
+        } else if (left > 0) {
+            fallback[0] += left;
+        }
+        final int[] chosen = split("Assign " + damage + " combat damage from " + attacker
+                + (toDefender && n > 0 ? ". The defender can take damage only once every blocker has lethal damage." : "."),
+                options, damage, fallback, s -> {
+                    if (toDefender && n > 0 && s[n] > 0) {
+                        for (int i = 0; i < n; i++) {
+                            if (s[i] < lethal[i]) {
+                                return "damage to the defender before lethal damage to every blocker";
+                            }
+                        }
+                    }
+                    return null;
+                });
+        final Map<CardView, Integer> assigned = new LinkedHashMap<>();
+        for (int i = 0; i < n; i++) {
+            if (chosen[i] > 0) {
+                assigned.put(blockers.get(i), chosen[i]);
+            }
+        }
+        if (toDefender && chosen[n] > 0) {
+            assigned.put(null, chosen[n]); // a null key is the defender
+        }
+        return assigned;
+    }
+
+    /**
+     * Asks the seat how to divide an amount (damage, counters, a shield) among targets. The default is one each
+     * first when every target needs at least one, and the rest to the first target.
      */
     @Override
     public Map<Object, Integer> assignGenericAmount(final CardView effectSource, final Map<Object, Integer> target, final int amount,
@@ -280,20 +347,35 @@ final class AgentGuiGame extends NetworkGuiGame {
         if (target == null || target.isEmpty()) {
             return assigned;
         }
+        final List<Object> targets = new ArrayList<>(target.keySet());
+        final int n = targets.size();
+        final int[] cap = new int[n];
+        final int[] fallback = new int[n];
+        final List<String> options = new ArrayList<>();
         int left = amount;
-        for (final Object t : target.keySet()) {
-            final int given = atLeastOne && left > 0 ? 1 : 0;
-            assigned.put(t, given);
-            left -= given;
+        for (int i = 0; i < n; i++) {
+            final Integer c = target.get(targets.get(i));
+            cap[i] = c == null || c <= 0 ? Integer.MAX_VALUE : c;
+            fallback[i] = atLeastOne && left > 0 ? 1 : 0;
+            left -= fallback[i];
+            options.add(targets.get(i) + (cap[i] == Integer.MAX_VALUE ? "" : ", at most " + cap[i]));
         }
-        if (left > 0) {
-            final Object first = target.keySet().iterator().next();
-            final Integer cap = target.get(first);
-            final int extra = cap == null || cap <= 0 ? left : Math.min(left, Math.max(0, cap - assigned.get(first)));
-            assigned.merge(first, extra, Integer::sum);
+        fallback[0] += Math.min(left, cap[0] - fallback[0]);
+        final int[] chosen = split("Divide " + amount + " " + amountLabel + " for " + effectSource
+                + (atLeastOne ? ". Every target gets at least 1." : "."), options, amount, fallback, s -> {
+                    for (int i = 0; i < n; i++) {
+                        if (atLeastOne && s[i] < 1) {
+                            return "every target needs at least 1";
+                        }
+                        if (s[i] > cap[i]) {
+                            return "more than " + cap[i] + " for one target";
+                        }
+                    }
+                    return null;
+                });
+        for (int i = 0; i < n; i++) {
+            assigned.put(targets.get(i), chosen[i]);
         }
-        messages.add("Divided " + amount + " " + amountLabel + " for " + effectSource + " without asking");
-        changed();
         return assigned;
     }
 
