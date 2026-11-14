@@ -4,7 +4,9 @@ import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import org.testng.annotations.AfterClass;
@@ -18,16 +20,16 @@ import com.google.gson.JsonObject;
 /**
  * The seat decides how a blocked trampler's damage is split, and its planned blocks show before
  * they are final. The agent's deck is Forests and Garruk's Companion, a 3/2 with trample; the host
- * AI plays 2/2 and 1/1 creatures. Both halves need the AI to cooperate, once by blocking and once
- * by attacking.
+ * AI plays Goblin Brigand, a 2/2 that attacks each combat if able, and Razorgrass Screen, a 2/1
+ * that blocks each combat if able.
  *
- * Planned block, first: the agent attacks with everything each turn, which leaves it one freshly
- * cast creature untapped and invites the host to attack. When it does, the agent picks the
- * attacker and then the blocker. Before OK is pressed the state lists the blocker under that
+ * Planned block, first: the agent does not attack until a Brigand has attacked it. It then picks
+ * the attacker and the blocker. Before OK is pressed the state lists the blocker under that
  * attacker, with {@code blocked} false. The prompt's {@code actionable} names the creature that can
  * block, and at declare attackers the one that can attack.
  *
- * Split, second: the agent attacks with one Companion a turn until it is blocked. The bridge asks
+ * Split, second: the agent attacks with one Companion a turn until it is blocked, and goes on
+ * blocking the Brigands. The bridge asks
  * with an "assign" decision whose default tramples over, and the agent puts all the damage on the
  * blocker instead. The host player's life total does not change in that combat.
  */
@@ -57,7 +59,7 @@ public class AgentCombatTest {
 
     @Test(timeOut = 420_000)
     public void theSeatSplitsTrampleDamageAndSeesItsPlannedBlock() throws Exception {
-        match = new RiggedMatch(DECK, RiggedMatch.deck("Host creatures", "18 Forest", "11 Llanowar Elves", "11 Grizzly Bears"));
+        match = new RiggedMatch(DECK, RiggedMatch.deck("Host attackers and blockers", "18 Mountain", "11 Goblin Brigand", "11 Razorgrass Screen"));
         final Set<String> tried = new HashSet<>();
         boolean split = false;
         boolean planned = false;
@@ -81,22 +83,21 @@ public class AgentCombatTest {
                 match.http.record("GET /game#assign", g);
                 final int amount = d.get("amount").getAsInt();
                 final JsonArray options = d.getAsJsonArray("options");
-                assertEquals(options.size(), 2, "one blocker and the defender: " + d);
+                assertTrue(options.size() >= 2, "the blockers and the defender: " + d);
                 assertTrue(options.get(0).getAsString().contains("lethal damage"), "the blocker says what is lethal: " + d);
-                assertTrue(options.get(1).getAsString().contains(RiggedMatch.HOST), "the defender is the last option: " + d);
-                assertFalse(d.get("default").getAsString().equals(amount + ",0"), "the default tramples over: " + d);
+                assertTrue(options.get(options.size() - 1).getAsString().contains(RiggedMatch.HOST), "the defender is the last option: " + d);
                 lifeBeforeSplit = match.hostLife(RiggedMatch.HOST);
                 splitTurn = g.get("turn").getAsInt();
                 final JsonArray amounts = new JsonArray();
                 amounts.add(amount);
-                amounts.add(0);
+                for (int i = 1; i < options.size(); i++) {
+                    amounts.add(0);
+                }
+                assertFalse(d.get("default").getAsString().equals(amounts.toString().replace("[", "").replace("]", "")),
+                        "the default does not put it all on the first blocker: " + d);
                 match.http.post("/game/decide", BridgeHttp.body("id", d.get("id").getAsInt(), "amounts", amounts));
                 split = true;
-            } else if (okEnabled && myTurn && "COMBAT_DECLARE_ATTACKERS".equals(phase) && !split && tried.add(turn + "attack")) {
-                if (!planned) {
-                    match.act("alphaStrike", null);
-                    continue;
-                }
+            } else if (okEnabled && myTurn && "COMBAT_DECLARE_ATTACKERS".equals(phase) && planned && !split && tried.add(turn + "attack")) {
                 // One attacker only, so that the host's life total changes by nothing but what tramples over.
                 for (final JsonElement c : me.getAsJsonArray("battlefield")) {
                     final JsonObject card = c.getAsJsonObject();
@@ -106,6 +107,22 @@ public class AgentCombatTest {
                         break;
                     }
                 }
+            } else if (okEnabled && !myTurn && "COMBAT_DECLARE_BLOCKERS".equals(phase) && planned && g.has("combat")
+                    && !g.getAsJsonArray("combat").isEmpty() && tried.add(turn + "block")) {
+                // Each attacker gets a blocker of its own while there are untapped ones.
+                final List<Integer> blockers = new ArrayList<>();
+                for (final JsonElement c : me.getAsJsonArray("battlefield")) {
+                    final JsonObject card = c.getAsJsonObject();
+                    if (CREATURE.equals(card.get("name").getAsString()) && !card.get("tapped").getAsBoolean()) {
+                        blockers.add(card.get("id").getAsInt());
+                    }
+                }
+                final JsonArray attackers = g.getAsJsonArray("combat");
+                for (int i = 0; i < attackers.size() && i < blockers.size(); i++) {
+                    match.act("selectCard", attackers.get(i).getAsJsonObject().get("attackerId").getAsInt());
+                    match.act("selectCard", blockers.get(i));
+                }
+                match.act("ok", null);
             } else if (okEnabled && !myTurn && "COMBAT_DECLARE_BLOCKERS".equals(phase) && !planned && g.has("combat")
                     && !g.getAsJsonArray("combat").isEmpty() && RiggedMatch.card(me, "battlefield", CREATURE) != null && tried.add(turn + "block")) {
                 final int attacker = g.getAsJsonArray("combat").get(0).getAsJsonObject().get("attackerId").getAsInt();
