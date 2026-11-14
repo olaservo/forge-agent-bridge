@@ -281,7 +281,8 @@ public class AgentSoakTest {
                 final boolean answerable = deciding || okEnabled || cancelEnabled || !offered.isEmpty();
                 final String what = "game " + index + " turn " + str(g.get("turn")) + " " + str(g.get("phase")) + ", host input "
                         + (hostInput == null ? "none" : name(hostInput)) + ", prompt \"" + firstLine(prompt) + "\", ok "
-                        + okEnabled + ", cancel " + cancelEnabled + ", offered " + offered.size();
+                        + okEnabled + ", cancel " + cancelEnabled + ", offered " + offered.size() + ", actionable " + g.get("actionable")
+                        + ", last message " + (g.getAsJsonArray("messages").isEmpty() ? "none" : g.getAsJsonArray("messages").get(g.getAsJsonArray("messages").size() - 1));
                 if (hostInput != null && !answerable) {
                     deadPrompts.add(what);
                 } else {
