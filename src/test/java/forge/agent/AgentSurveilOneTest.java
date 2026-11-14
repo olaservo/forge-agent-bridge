@@ -42,7 +42,7 @@ public class AgentSurveilOneTest {
 
     @Test(timeOut = 300_000)
     public void theGraveyardButtonPutsTheCardInTheGraveyard() throws Exception {
-        match = new RiggedMatch(DECK);
+        match = new RiggedMatch(DECK, RiggedMatch.deck("Host lands", "40 Forest"));
         int looked = -1;
         final long deadline = System.currentTimeMillis() + 240_000;
         while (looked < 0) {

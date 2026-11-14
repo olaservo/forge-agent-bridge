@@ -128,8 +128,9 @@ final class RiggedMatch {
 
     /**
      * The moves every one of these tests makes: answer a decision with its first option (a split with the
-     * bridge's own), pay with Auto, play this land, cast this spell once enough of the lands are untapped,
-     * and otherwise pass. The test handles the prompt it is about before calling this.
+     * bridge's own), pick the cards a prompt requires, pay with Auto, play this land, cast this spell once
+     * enough of the lands are untapped, and otherwise pass. The test handles the prompt it is about before
+     * calling this.
      */
     void basics(final JsonObject g, final String land, final String spell, final int landsNeeded) throws Exception {
         final JsonObject buttons = g.getAsJsonObject("buttons");
@@ -147,6 +148,8 @@ final class RiggedMatch {
             choices.add(0);
             final boolean split = "assign".equals(d.get("kind").getAsString());
             http.post("/game/decide", BridgeHttp.body("id", d.get("id").getAsInt(), "choices", choices, "text", split ? d.get("default").getAsString() : null));
+        } else if (required(g) != null) {
+            act("selectCard", required(g));
         } else if (!AgentGameTest.iHavePriority(g) && g.get("prompt").getAsString().startsWith("Waiting for")) {
             // The other player is acting.
         } else if ("Auto".equals(buttons.get("ok").getAsString())) {
@@ -164,6 +167,25 @@ final class RiggedMatch {
         } else if (buttons.get("cancelEnabled").getAsBoolean()) {
             act("cancel", null);
         }
+    }
+
+    /** A card to pick next when the prompt requires more cards than are chosen, or null. */
+    static Integer required(final JsonObject g) {
+        if (!g.has("selection")) {
+            return null;
+        }
+        final JsonObject sel = g.getAsJsonObject("selection");
+        final String chosen = sel.getAsJsonArray("chosen").toString();
+        if (sel.getAsJsonArray("chosen").size() >= sel.get("min").getAsInt()) {
+            return null;
+        }
+        for (final JsonElement c : sel.getAsJsonArray("cards")) {
+            final int id = c.getAsJsonObject().get("id").getAsInt();
+            if (!chosen.contains("\"id\":" + id + ",")) {
+                return id;
+            }
+        }
+        return null;
     }
 
     JsonObject act(final String action, final Integer id) throws Exception {

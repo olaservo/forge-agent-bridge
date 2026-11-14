@@ -45,7 +45,7 @@ public class AgentPhasingTest {
 
     @Test(timeOut = 300_000)
     public void aPhasedOutCardIsMarked() throws Exception {
-        match = new RiggedMatch(DECK);
+        match = new RiggedMatch(DECK, RiggedMatch.deck("Host lands", "40 Forest"));
         boolean seenPhasedIn = false;
         boolean seenPlayable = false;
         final long deadline = System.currentTimeMillis() + 240_000;
