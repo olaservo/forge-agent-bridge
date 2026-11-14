@@ -12,11 +12,15 @@ One bridge is one seat. It listens on `127.0.0.1` only and has no authentication
 
 ## Requirements
 
-- A JDK, 17 or newer, and Maven to build.
+- Java 17 or newer. To build from source, a JDK and Maven.
 - A Forge desktop build: its `forge-gui-desktop-<version>-jar-with-dependencies.jar` and the folder that holds Forge's `res`.
-- The bridge calls Forge's internal classes, which change between versions. Build it against the Forge version you will run, and have the host run that version too.
+- The bridge calls Forge's internal classes, which change between versions. Use a jar built against the Forge version you will run, and have the host run that version too.
 
-Built against Forge `2.0.16-SNAPSHOT` (upstream commit `bdcce440b7c`) and run on 2026-11-11 against a desktop host of the same build: connect, lobby, avatar, chat and disconnect. The Forge jar used was built from a fork that also carried these classes, with this jar first on the classpath. On 2026-11-12 the draft, match and rigged-deck tests passed against that jar with the fork's copy of the classes removed. Not yet tried against a Forge release download.
+## Download
+
+The [releases page](https://github.com/olaservo/forge-agent-bridge/releases) has a jar for each Forge version it was built against. The file name ends with that version: `forge-agent-bridge-0.1.0-forge-2.0.16.jar` goes with the [Forge 2.0.16](https://github.com/Card-Forge/forge/releases/tag/forge-2.0.16) desktop release. Each release's notes say what was run against it.
+
+For another Forge version, build from source.
 
 ## Build
 
