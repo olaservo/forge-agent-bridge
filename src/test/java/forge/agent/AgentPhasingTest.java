@@ -16,7 +16,8 @@ import forge.game.zone.ZoneType;
  * A phased-out permanent is marked. The deck is 20 Island and 20 Teferi's Isle, a land with
  * phasing. The agent plays an Isle, and on its next turn the Isle phases out: the bridge still
  * lists it on the battlefield, now with {@code phasedOut}, while the host's own game no longer
- * counts it among the cards there.
+ * counts it among the cards there. Along the way the state's {@code actionable} names a card in
+ * hand, a land that can be played.
  */
 public class AgentPhasingTest {
 
@@ -46,6 +47,7 @@ public class AgentPhasingTest {
     public void aPhasedOutCardIsMarked() throws Exception {
         match = new RiggedMatch(DECK);
         boolean seenPhasedIn = false;
+        boolean seenPlayable = false;
         final long deadline = System.currentTimeMillis() + 240_000;
         while (true) {
             final JsonObject g = match.next();
@@ -55,12 +57,19 @@ public class AgentPhasingTest {
             if (isle != null && isle.has("phasedOut")) {
                 assertTrue(seenPhasedIn, "it was on the battlefield unmarked first");
                 assertTrue(isle.get("phasedOut").getAsBoolean());
+                assertTrue(seenPlayable, "a card in hand was listed as actionable at some prompt");
                 assertFalse(match.hostIds(RiggedMatch.ME, ZoneType.Battlefield).contains(isle.get("id").getAsInt()),
                         "the host does not count it on the battlefield");
                 match.http.record("GET /game#phasedOut", g);
                 break;
             }
             seenPhasedIn |= isle != null;
+            if (g.has("actionable") && RiggedMatch.me(g) != null) {
+                final String hand = RiggedMatch.me(g).getAsJsonArray("hand").toString();
+                for (final JsonElement a : g.getAsJsonArray("actionable")) {
+                    seenPlayable |= hand.contains("\"id\":" + a.getAsJsonObject().get("id").getAsInt() + ",");
+                }
+            }
             // One Isle only: it is legendary. After it, Islands.
             match.basics(g, isle == null ? ISLE : "Island", "no spell", 99);
         }

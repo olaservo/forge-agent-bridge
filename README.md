@@ -81,6 +81,7 @@ All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 What the seat is asked comes in three forms in the game state:
 
 - `buttons` and `prompt`: answer with the `ok` and `cancel` actions.
+- `actionable`: the host's list of cards that can act at this prompt: playable cards with priority, creatures that can attack or block while declaring, mana sources while paying. Each entry is `id` and `name`. It is Forge's highlight hint, so a card missing from it may still be usable.
 - `selection`: the prompt accepts cards (`cards`, answered with `selectCard`) or players (`players`, answered with `selectPlayer`). `chosen` lists what is picked so far, and the attacker being blocked while declaring blockers.
 - `pendingDecision`: answer with `/game/decide`. `choices` holds option indices. For kind `assign`, which splits combat damage or a divided amount, send one number per option in `amounts`, or the same as comma-separated `text`; they must add up to the decision's `amount`. A split that breaks a rule is replaced by the bridge's `default` and a line in `messages` says so.
 

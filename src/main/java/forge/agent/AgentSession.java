@@ -2,9 +2,11 @@ package forge.agent;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
@@ -92,6 +94,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     /** The setting last sent to the host, and the game it was sent for. */
     private volatile boolean yieldSent;
     private volatile int yieldSentForGame;
+    /** The game for which the host was asked to list actionable cards. */
+    private volatile int highlightsSentForGame;
     /** The turn of ours on which we pressed End Turn, or -1. */
     private volatile int endedTurn = -1;
 
@@ -377,6 +381,15 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
         if (game != yieldSentForGame) {
             endedTurn = -1;
+        }
+        if (game != highlightsSentForGame) {
+            highlightsSentForGame = game;
+            try {
+                // The host fills Selection.actionable only for a seat with this setting on.
+                c.setYieldPref(FPref.UI_SHOW_ACTIONABLE_HIGHLIGHTS, "true");
+            } catch (final RuntimeException e) {
+                System.err.println("[agent] could not ask for actionable cards: " + e);
+            }
         }
         final boolean want = wantAutoPass();
         if (!force && game == yieldSentForGame && want == yieldSent) {
@@ -803,6 +816,20 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             }
             final List<Map<String, Object>> targetPlayers = entities(sel.targets(), true);
             final List<Map<String, Object>> chosen = entities(sel.chosen(), false);
+            // The host's hint at what can act now: cards that can be played, attack, block or pay.
+            final List<Map<String, Object>> actionable = new ArrayList<>();
+            final Set<Integer> listed = new HashSet<>();
+            for (final CardView cv : sel.actionable()) {
+                if (cv != null && listed.add(cv.getId())) {
+                    final Map<String, Object> am = new LinkedHashMap<>();
+                    am.put("id", cv.getId());
+                    am.put("name", cv.getName());
+                    actionable.add(am);
+                }
+            }
+            if (!actionable.isEmpty()) {
+                m.put("actionable", actionable);
+            }
             if (!offered.isEmpty() || !targetPlayers.isEmpty() || !chosen.isEmpty()) {
                 final Map<String, Object> sm = new LinkedHashMap<>();
                 sm.put("min", sel.min());

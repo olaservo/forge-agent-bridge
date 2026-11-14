@@ -24,7 +24,8 @@ import com.google.gson.JsonObject;
  * Planned block, first: the agent attacks with everything each turn, which leaves it one freshly
  * cast creature untapped and invites the host to attack. When it does, the agent picks the
  * attacker and then the blocker. Before OK is pressed the state lists the blocker under that
- * attacker, with {@code blocked} false.
+ * attacker, with {@code blocked} false. The prompt's {@code actionable} names the creature that can
+ * block, and at declare attackers the one that can attack.
  *
  * Split, second: the agent attacks with one Companion a turn until it is blocked. The bridge asks
  * with an "assign" decision whose default tramples over, and the agent puts all the damage on the
@@ -100,6 +101,7 @@ public class AgentCombatTest {
                 for (final JsonElement c : me.getAsJsonArray("battlefield")) {
                     final JsonObject card = c.getAsJsonObject();
                     if (CREATURE.equals(card.get("name").getAsString()) && !card.get("tapped").getAsBoolean() && !card.get("sick").getAsBoolean()) {
+                        assertTrue(actionable(g).contains(card.get("id").getAsInt()), "a creature that can attack is actionable: " + g.get("actionable"));
                         match.act("selectCard", card.get("id").getAsInt());
                         break;
                     }
@@ -108,6 +110,11 @@ public class AgentCombatTest {
                     && !g.getAsJsonArray("combat").isEmpty() && RiggedMatch.card(me, "battlefield", CREATURE) != null && tried.add(turn + "block")) {
                 final int attacker = g.getAsJsonArray("combat").get(0).getAsJsonObject().get("attackerId").getAsInt();
                 final int blocker = RiggedMatch.card(me, "battlefield", CREATURE).get("id").getAsInt();
+                // The selection follows the prompt in a message of its own.
+                AgentGameTest.waitFor("the block prompt's selection arrives", 5_000, () -> match.http.get("/game").has("selection"));
+                final JsonObject asked = match.http.get("/game");
+                assertTrue(actionable(asked).contains(blocker), "the creature that can block is actionable: " + asked);
+                match.http.record("GET /game#blockers", asked);
                 match.act("selectCard", attacker);
                 match.act("selectCard", blocker);
                 final JsonObject mid = match.http.get("/game");
@@ -142,5 +149,15 @@ public class AgentCombatTest {
         }
         assertEquals(match.hostLife(RiggedMatch.HOST), lifeBeforeSplit, "all the damage went to the blocker, none trampled over");
         match.finish();
+    }
+
+    private static Set<Integer> actionable(final JsonObject g) {
+        final Set<Integer> ids = new HashSet<>();
+        if (g.has("actionable")) {
+            for (final JsonElement c : g.getAsJsonArray("actionable")) {
+                ids.add(c.getAsJsonObject().get("id").getAsInt());
+            }
+        }
+        return ids;
     }
 }
