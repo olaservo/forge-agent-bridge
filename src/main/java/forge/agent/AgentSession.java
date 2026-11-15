@@ -264,6 +264,12 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         requireClient().send(UpdateLobbyPlayerEvent.avatarUpdate(index));
     }
 
+    void setName(final String newName) {
+        requireClient().send(UpdateLobbyPlayerEvent.nameUpdate(newName));
+        name = newName;
+        changed();
+    }
+
     void setDeck(final Deck deck) {
         requireClient().send(UpdateLobbyPlayerEvent.deckUpdate(deck));
     }

@@ -115,6 +115,14 @@ public final class AgentBridge {
             case "POST /lobby/avatar":
                 session.setAvatar(body.get("index").getAsInt());
                 return session.lobbySnapshot();
+            case "POST /lobby/name": {
+                final String name = str(body, "name", "").trim();
+                if (name.isEmpty()) {
+                    throw new IllegalArgumentException("name is empty");
+                }
+                session.setName(name);
+                return session.lobbySnapshot();
+            }
             case "POST /lobby/deck": {
                 final Deck deck = resolveDeck(optStr(body, "name"), optStr(body, "dck"));
                 session.setDeck(deck);

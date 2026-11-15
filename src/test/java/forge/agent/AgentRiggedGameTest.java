@@ -117,6 +117,14 @@ public class AgentRiggedGameTest {
         AgentGameTest.waitFor("the bridge reports the avatar on its own slot", 20_000, () -> slot(http.get("/status"), 1).get("avatar").getAsInt() == avatar);
         assertTrue(slot(http.get("/status"), 0).get("avatar").getAsInt() != avatar, "the host's avatar is unchanged");
 
+        http.post("/lobby/name", BridgeHttp.body("name", "Renamed Bot"));
+        AgentGameTest.waitFor("host sees the agent's new name", 20_000, () -> "Renamed Bot".equals(lobby.getSlot(1).getName()));
+        AgentGameTest.waitFor("the bridge reports the new name", 20_000, () -> {
+            final JsonObject status = http.get("/status");
+            return "Renamed Bot".equals(slot(status, 1).get("name").getAsString())
+                    && "Renamed Bot".equals(status.getAsJsonObject("connection").get("name").getAsString());
+        });
+
         final JsonObject deck = http.post("/lobby/deck", BridgeHttp.body("dck", DECK));
         assertEquals(deck.get("size").getAsInt(), 40, "deck text parsed: " + deck);
         http.post("/lobby/ready", BridgeHttp.body("ready", true));
