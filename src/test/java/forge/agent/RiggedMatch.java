@@ -8,6 +8,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -26,6 +27,7 @@ import forge.gamemodes.net.server.ServerGameLobby;
 import forge.gui.GuiBase;
 import forge.interfaces.IUpdateable;
 import forge.localinstance.properties.ForgeNetPreferences.FNetPref;
+import forge.localinstance.properties.ForgePreferences;
 import forge.localinstance.properties.ForgePreferences.FPref;
 import forge.model.FModel;
 
@@ -49,6 +51,12 @@ final class RiggedMatch {
     private int quiet;
 
     static void initializeModel() {
+        initializeModel(preferences -> {
+        });
+    }
+
+    /** {@code more} sets a test's own preferences along with the shared ones. */
+    static void initializeModel(final Consumer<ForgePreferences> more) {
         GuiBase.setInterface(new AgentGuiBase());
         FModel.initialize(null, preferences -> {
             preferences.setPref(FPref.LOAD_CARD_SCRIPTS_LAZILY, false);
@@ -56,6 +64,7 @@ final class RiggedMatch {
             preferences.setPref(FPref.PLAYER_NAME, HOST); // a blank name pops a Swing input dialog at match start
             preferences.setPref(FPref.UI_ENABLE_SOUNDS, false);
             preferences.setPref(FPref.UI_ENABLE_MUSIC, false);
+            more.accept(preferences);
             return null;
         });
         FModel.getNetPreferences().setPref(FNetPref.UPnP, "NEVER");
@@ -79,6 +88,16 @@ final class RiggedMatch {
 
     /** Hosts, seats the agent with this deck, starts the game and waits until the agent is in it. */
     RiggedMatch(final String deck, final Deck hostDeck) throws Exception {
+        this(hostDeck);
+        start(deck);
+    }
+
+    /** Hosts and seats the agent, and leaves it in the lobby without a deck. {@link #start} begins the game. */
+    static RiggedMatch inLobby() throws Exception {
+        return new RiggedMatch((Deck) null);
+    }
+
+    private RiggedMatch(final Deck hostDeck) throws Exception {
         final int hostPort = freePort();
         server.startServer(hostPort);
         server.setLobby(lobby);
@@ -102,7 +121,11 @@ final class RiggedMatch {
         http = new BridgeHttp(bridge.port());
         http.post("/connect", BridgeHttp.body("host", "127.0.0.1", "port", hostPort, "name", ME));
         AgentGameTest.waitFor("agent takes lobby slot 1", 20_000, () -> http.get("/status").getAsJsonObject("lobby").get("mySlot").getAsInt() == 1);
-        http.post("/lobby/deck", BridgeHttp.body("dck", deck));
+    }
+
+    /** Sends the agent's deck, readies, starts the game and waits until the agent is in it. Returns the bridge's answer to the deck. */
+    JsonObject start(final String deck) throws Exception {
+        final JsonObject sent = http.post("/lobby/deck", BridgeHttp.body("dck", deck));
         http.post("/lobby/ready", BridgeHttp.body("ready", true));
         AgentGameTest.waitFor("host sees the agent's deck and ready flag", 20_000,
                 () -> lobby.getSlot(1).isReady() && lobby.getSlot(1).getDeck() != null);
@@ -110,6 +133,7 @@ final class RiggedMatch {
         assertNotNull(start, "lobby accepted the match setup");
         start.run();
         AgentGameTest.waitFor("agent gets openView", 30_000, () -> http.get("/game").get("inGame").getAsBoolean());
+        return sent;
     }
 
     /** Waits until something changed, or a few seconds passed with nothing, and returns the game. */
@@ -167,6 +191,13 @@ final class RiggedMatch {
         } else if (buttons.get("cancelEnabled").getAsBoolean()) {
             act("cancel", null);
         }
+    }
+
+    /** The pending decision when it is of this kind, or null. */
+    static JsonObject decision(final JsonObject g, final String kind) {
+        final JsonElement pd = g.get("pendingDecision");
+        final boolean asked = pd != null && !pd.isJsonNull() && kind.equals(pd.getAsJsonObject().get("kind").getAsString());
+        return asked ? pd.getAsJsonObject() : null;
     }
 
     /** A card to pick next when the prompt requires more cards than are chosen, or null. */
