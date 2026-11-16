@@ -78,7 +78,7 @@ All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 - `GET /draft/pack`, `POST /draft/pick {card}`, `GET /draft/pool`
 - `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}` or `{id, amounts}`, `POST /game/yield {autoPass}`
 
-What the seat is asked comes in three forms in the game state:
+What the seat is asked comes in four forms in the game state:
 
 - `buttons` and `prompt`: answer with the `ok` and `cancel` actions.
 - `actionable`: the host's list of cards that can act at this prompt: playable cards with priority, creatures that can attack or block while declaring, mana sources while paying. Each entry is `id` and `name`. It is Forge's highlight hint, so a card missing from it may still be usable.

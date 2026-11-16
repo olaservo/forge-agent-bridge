@@ -15,10 +15,10 @@ import forge.deck.Deck;
 import forge.deck.DeckSection;
 import forge.game.GameLogEntry;
 import forge.game.GameView;
-import forge.game.phase.PhaseType;
 import forge.game.card.CardView;
 import forge.game.card.CardView.CardStateView;
 import forge.game.combat.CombatView;
+import forge.game.phase.PhaseType;
 import forge.game.player.PlayerView;
 import forge.game.spellability.StackItemView;
 import forge.game.zone.ZoneType;
@@ -27,8 +27,8 @@ import forge.gamemodes.match.LobbySlot;
 import forge.gamemodes.match.NextGameDecision;
 import forge.gamemodes.match.Selection;
 import forge.gamemodes.net.ChatMessage;
-import forge.gamemodes.net.NetworkEventView;
 import forge.gamemodes.net.EventParticipant;
+import forge.gamemodes.net.NetworkEventView;
 import forge.gamemodes.net.client.ClientGameLobby;
 import forge.gamemodes.net.client.FGameClient;
 import forge.gamemodes.net.event.DraftPickEvent;
@@ -64,7 +64,6 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private volatile boolean connected;
     private volatile String closeReason;
 
-    private static final long SEAT_WAIT_MILLIS = 10_000;
     private volatile GameLobbyData lobbyData;
     private volatile int mySlot = -1;
     final List<String> chat = new CopyOnWriteArrayList<>();
@@ -99,6 +98,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     /** The turn of ours on which we pressed End Turn, or -1. */
     private volatile int endedTurn = -1;
 
+    private static final long SEAT_WAIT_MILLIS = 10_000;
+    private static final long CANCEL_BEFORE_CONCEDE_MILLIS = 1000;
     private static final long ACT_FIRST_REACTION_MILLIS = 1500;
     private static final long ACT_QUIET_MILLIS = 400;
     private static final long ACT_SETTLE_MILLIS = 3000;
@@ -552,8 +553,6 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             Thread.currentThread().interrupt();
         }
     }
-
-    private static final long CANCEL_BEFORE_CONCEDE_MILLIS = 1000;
 
     boolean decide(final int id, final List<Integer> indices, final String text) {
         return gui.answer(id, indices, text);

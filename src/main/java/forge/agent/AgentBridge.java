@@ -32,6 +32,11 @@ import forge.model.FModel;
  */
 public final class AgentBridge {
 
+    private static final String DEFAULT_HOST = "127.0.0.1";
+    /** Forge's default port for a hosted lobby. */
+    private static final int DEFAULT_HOST_PORT = 36743;
+    private static final String DEFAULT_NAME = "Agent";
+
     private final AgentSession session = new AgentSession();
     private final Gson gson = new GsonBuilder().serializeNulls().disableHtmlEscaping().create();
     private HttpServer server;
@@ -97,13 +102,9 @@ public final class AgentBridge {
                 session.awaitChange(since, Math.min(timeout, 120_000L));
                 return session.status();
             }
-            case "POST /connect": {
-                final String host = str(body, "host", "127.0.0.1");
-                final int port = body.has("port") ? body.get("port").getAsInt() : 36743;
-                final String name = str(body, "name", "Agent");
-                session.connect(host, port, name);
+            case "POST /connect":
+                session.connect(str(body, "host", DEFAULT_HOST), hostPort(body), str(body, "name", DEFAULT_NAME));
                 return session.status();
-            }
             case "POST /disconnect":
                 session.disconnect();
                 return session.status();
@@ -141,12 +142,9 @@ public final class AgentBridge {
                 return session.gameSnapshot(true);
             case "GET /game/log":
                 return Map.of("log", session.gameLog(Integer.parseInt(q.getOrDefault("since", "0"))));
-            case "POST /game/act": {
-                final Integer id = body.has("id") && !body.get("id").isJsonNull() ? body.get("id").getAsInt() : null;
-                final Integer color = body.has("color") && !body.get("color").isJsonNull() ? body.get("color").getAsInt() : null;
-                session.act(str(body, "action", null), id, color);
+            case "POST /game/act":
+                session.act(str(body, "action", null), optInt(body, "id"), optInt(body, "color"));
                 return session.gameSnapshot(false);
-            }
             case "POST /game/yield":
                 session.setAutoPass(str(body, "autoPass", null));
                 return session.gameSnapshot(false);
@@ -158,7 +156,7 @@ public final class AgentBridge {
                         indices.add(e.getAsInt());
                     }
                 }
-                String text = body.has("text") && !body.get("text").isJsonNull() ? body.get("text").getAsString() : null;
+                String text = optStr(body, "text");
                 if (body.has("amounts") && body.get("amounts").isJsonArray()) {
                     // An "assign" decision: one number per option. Carried as text, which works as well.
                     final List<String> amounts = new ArrayList<>();
@@ -188,8 +186,12 @@ public final class AgentBridge {
         } else {
             deck = deckName == null && dck == null ? null : resolveDeck(deckName, dck);
         }
-        final int port = body.has("port") ? body.get("port").getAsInt() : 36743;
-        return session.sit(str(body, "host", "127.0.0.1"), port, str(body, "name", "Agent"), deck);
+        return session.sit(str(body, "host", DEFAULT_HOST), hostPort(body), str(body, "name", DEFAULT_NAME), deck);
+    }
+
+    private static int hostPort(final JsonObject body) {
+        final Integer port = optInt(body, "port");
+        return port == null ? DEFAULT_HOST_PORT : port;
     }
 
     /** A relative path is read from the working directory, the folder that holds Forge's res. */
@@ -238,6 +240,10 @@ public final class AgentBridge {
 
     private static String optStr(final JsonObject o, final String key) {
         return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
+    }
+
+    private static Integer optInt(final JsonObject o, final String key) {
+        return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsInt() : null;
     }
 
     private static String str(final JsonObject o, final String key, final String dflt) {
