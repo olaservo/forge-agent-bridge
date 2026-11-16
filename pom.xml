@@ -26,6 +26,9 @@
         <forge.jar>${project.basedir}/forge.jar</forge.jar>
         <!-- The folder that holds Forge's res, used as the working directory for tests: -Dforge.home=<path> -->
         <forge.home>${project.basedir}</forge.home>
+        <!-- Where the tests write. Their working directory is forge.home, so a relative path would land there. -->
+        <agent.fixtures>${project.build.directory}/agent-fixtures</agent.fixtures>
+        <agent.soak.dir>${project.build.directory}/agent-soak</agent.soak.dir>
         <skipTests>true</skipTests>
     </properties>
 
@@ -65,6 +68,10 @@
                 <version>3.5.2</version>
                 <configuration>
                     <workingDirectory>${forge.home}</workingDirectory>
+                    <systemPropertyVariables>
+                        <agent.fixtures>${agent.fixtures}</agent.fixtures>
+                        <agent.soak.dir>${agent.soak.dir}</agent.soak.dir>
+                    </systemPropertyVariables>
                     <argLine>-Djava.awt.headless=true -Dfile.encoding=UTF-8 -Dio.netty.tryReflectionSetAccessible=true -Xmx3072m</argLine>
                 </configuration>
             </plugin>
