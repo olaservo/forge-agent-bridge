@@ -43,6 +43,7 @@ import forge.localinstance.properties.ForgePreferences.FPref;
 import forge.model.FModel;
 import forge.trackable.TrackableObject;
 import forge.trackable.TrackableTypes;
+import forge.util.Localizer;
 import forge.util.collect.FCollection;
 import forge.util.collect.FCollectionView;
 
@@ -98,6 +99,18 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     /** The turn of ours on which we pressed End Turn, or -1. */
     private volatile int endedTurn = -1;
 
+    /**
+     * The host sends its prompt and button labels as text in its own language, and Forge's clients tell them
+     * apart by comparing with their own translation. These match a host that runs in the bridge's language.
+     */
+    private static String endTurnLabel() {
+        return Localizer.getInstance().getMessage("lblEndTurn");
+    }
+
+    private static String priorityPrefix() {
+        return Localizer.getInstance().getMessage("lblPriority") + ": ";
+    }
+
     private static final long SEAT_WAIT_MILLIS = 10_000;
     private static final long CANCEL_BEFORE_CONCEDE_MILLIS = 1000;
     private static final long ACT_FIRST_REACTION_MILLIS = 1500;
@@ -106,6 +119,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     /** No action is sent this soon after switching auto-pass on. */
     private static final long YIELD_ON_GAP_MILLIS = 750;
     private final Object actLock = new Object();
+    private final Object yieldLock = new Object();
     private volatile long lastYieldOnAt;
     private volatile boolean acting;
     private volatile Thread actingThread;
@@ -381,6 +395,14 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
      * keeps it per game. Called on every change, so it follows the turn.
      */
     private void sendYieldPrefs(final boolean force) {
+        // Called from the Agent-EDT thread, the network thread and HTTP threads. One at a time, so the host
+        // receives the settings in the order they were decided.
+        synchronized (yieldLock) {
+            sendYieldPrefsLocked(force);
+        }
+    }
+
+    private void sendYieldPrefsLocked(final boolean force) {
         final int game = gui.gamesOpened;
         final IGameController c = gui.getGameController();
         if (c == null || game == 0) {
@@ -469,7 +491,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             if (clear > 0) {
                 Thread.sleep(clear);
             }
-            long seen = revision.get();
+            final long seen = revision.get();
             acting = true;
             actingThread = Thread.currentThread();
             try {
@@ -477,17 +499,21 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             } finally {
                 acting = false;
             }
-            // First reaction, then let it settle: the host sends several updates per action.
-            final long deadline = System.currentTimeMillis() + ACT_SETTLE_MILLIS;
-            long wait = ACT_FIRST_REACTION_MILLIS;
-            while (System.currentTimeMillis() < deadline) {
-                final long now = awaitChange(seen, Math.min(wait, deadline - System.currentTimeMillis()));
-                if (now == seen) {
-                    break; // quiet: the host is done reacting, or never reacted
-                }
-                seen = now;
-                wait = ACT_QUIET_MILLIS;
+            settle(seen);
+        }
+    }
+
+    /** Waits for the host's first reaction after {@code seen}, then lets it settle: it sends several updates per action. */
+    private void settle(long seen) throws InterruptedException {
+        final long deadline = System.currentTimeMillis() + ACT_SETTLE_MILLIS;
+        long wait = ACT_FIRST_REACTION_MILLIS;
+        while (System.currentTimeMillis() < deadline) {
+            final long now = awaitChange(seen, Math.min(wait, deadline - System.currentTimeMillis()));
+            if (now == seen) {
+                break; // quiet: the host is done reacting, or never reacted
             }
+            seen = now;
+            wait = ACT_QUIET_MILLIS;
         }
     }
 
@@ -498,7 +524,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         // The two clicks that end our turn: End Turn, and OK in our end step with nothing on the stack.
         int endsTurn = -1;
         if (gv != null && me != null && gv.getPlayerTurn() != null && gv.getPlayerTurn().getId() == me.getId()) {
-            final boolean endTurn = "cancel".equals(action) && "End Turn".equals(gui.cancelLabel);
+            final boolean endTurn = "cancel".equals(action) && endTurnLabel().equals(gui.prompt.cancelLabel());
             final boolean lastPass = "ok".equals(action) && gv.getPhase() == PhaseType.END_OF_TURN
                     && (gv.getStack() == null || gv.getStack().isEmpty());
             if (endTurn || lastPass) {
@@ -510,8 +536,10 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             // Auto-pass goes on after the click. Sent while our prompt is still up, it makes the host recompute
             // our actions on a network thread while the click resumes the game thread, and the host died with a
             // ConcurrentModificationException.
-            endedTurn = endsTurn;
-            sendYieldPrefs(false);
+            synchronized (yieldLock) {
+                endedTurn = endsTurn;
+                sendYieldPrefsLocked(false);
+            }
         }
     }
 
@@ -542,7 +570,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
      */
     private void cancelSelection(final IGameController c) {
         final Selection sel = gui.getSelection();
-        if (!gui.cancelEnabled || sel == null || (sel.cards().isEmpty() && sel.targets().isEmpty())) {
+        if (!gui.prompt.cancelEnabled() || sel == null || (sel.cards().isEmpty() && sel.targets().isEmpty())) {
             return;
         }
         final long seen = revision.get();
@@ -554,8 +582,16 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
     }
 
-    boolean decide(final int id, final List<Integer> indices, final String text) {
-        return gui.answer(id, indices, text);
+    /** Answers a decision and, like {@link #act}, returns once the host has reacted and gone quiet. False for an unknown id. */
+    boolean decide(final int id, final List<Integer> indices, final String text) throws InterruptedException {
+        synchronized (actLock) {
+            final long seen = revision.get();
+            if (!gui.answer(id, indices, text)) {
+                return false;
+            }
+            settle(seen);
+            return true;
+        }
     }
 
     // ---- snapshot ----
@@ -715,15 +751,17 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         final GameView gv = gui.getGameView();
         m.put("inGame", gv != null && !gui.gameFinished);
         m.put("finished", gui.gameFinished);
-        m.put("prompt", gui.promptMessage);
-        m.put("promptCount", gui.promptCount);
-        m.put("waiting", gui.waiting);
-        m.put("promptCard", gui.promptCard == null ? null : gui.promptCard.getName());
+        final AgentGuiGame.Prompt prompt = gui.prompt;
+        m.put("prompt", prompt.message());
+        m.put("promptCount", prompt.count());
+        m.put("waiting", prompt.waiting());
+        m.put("priorityPrompt", prompt.message().startsWith(priorityPrefix()));
+        m.put("promptCard", prompt.card() == null ? null : prompt.card().getName());
         final Map<String, Object> buttons = new LinkedHashMap<>();
-        buttons.put("ok", gui.okLabel);
-        buttons.put("okEnabled", gui.okEnabled);
-        buttons.put("cancel", gui.cancelLabel);
-        buttons.put("cancelEnabled", gui.cancelEnabled);
+        buttons.put("ok", prompt.okLabel());
+        buttons.put("okEnabled", prompt.okEnabled());
+        buttons.put("cancel", prompt.cancelLabel());
+        buttons.put("cancelEnabled", prompt.cancelEnabled());
         m.put("buttons", buttons);
         m.put("incorrectActions", gui.incorrectActions);
         final PendingDecision d = gui.pending;
