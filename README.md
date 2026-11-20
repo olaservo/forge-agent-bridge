@@ -8,7 +8,7 @@ This project is independent. It is not affiliated with, endorsed by or sponsored
 
 The bridge is a small jar that runs beside Forge's own jar on the Java classpath. It uses Forge's classes and does not change them, so no custom Forge build is needed. It does not contain Forge.
 
-One bridge is one seat. It listens on `127.0.0.1` only and has no authentication.
+One bridge is one seat. It listens on `127.0.0.1` only and has no authentication, so any program on the machine can drive the seat. A web page cannot: a request with an `Origin` header, or with a `Host` other than `127.0.0.1`, `localhost` or `[::1]`, gets 403.
 
 ## Requirements
 
@@ -81,10 +81,10 @@ All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 What the seat is asked comes in four forms in the game state:
 
 - `buttons` and `prompt`: answer with the `ok` and `cancel` actions.
-- `promptCount` goes up with each prompt the host sends, so a prompt with the same text as the last one is still seen as new. `waiting` is true from the end of one of the seat's inputs until the host's next prompt, while `prompt` reads "Waiting for ...".
+- `promptCount` goes up with each prompt the host sends, so a prompt with the same text as the last one is still seen as new. `waiting` is true from the end of one of the seat's inputs until the host's next prompt, while `prompt` reads "Waiting for ...". `priorityPrompt` is true while the prompt is the one that offers priority. The host sends prompts and button labels as text in its own language, and the bridge recognises that prompt and the End Turn button by comparing with Forge's English text, as Forge's own clients compare with their translation. Taken from Forge's code (`InputBase`, `VPrompt`); a host in another language has not been run.
 - `actionable`: the host's list of cards that can act at this prompt: playable cards with priority, creatures that can attack or block while declaring, mana sources while paying. Each entry is `id` and `name`. It is Forge's highlight hint, so a card missing from it may still be usable.
 - `selection`: the prompt accepts cards (`cards`, answered with `selectCard`) or players (`players`, answered with `selectPlayer`). `chosen` lists what is picked so far, and the attacker being blocked while declaring blockers. Picking the card that reaches `max` answers the prompt without OK.
-- `pendingDecision`: answer with `/game/decide`. `choices` holds option indices. For kind `assign`, which splits combat damage or a divided amount, send one number per option in `amounts`, or the same as comma-separated `text`; they must add up to the decision's `amount`. A split that breaks a rule is replaced by the bridge's `default` and a line in `messages` says so.
+- `pendingDecision`: answer with `/game/decide`. `choices` holds option indices. For kind `assign`, which splits combat damage or a divided amount, send one number per option in `amounts`, or the same as comma-separated `text`; they must add up to the decision's `amount`. A split that breaks a rule is replaced by the bridge's `default` and a line in `messages` says so. Like `/game/act`, it answers once the host has reacted and gone quiet.
 
 `concede` first cancels an open prompt that selects cards or targets. Forge's target prompt asks again without end once the game is over, and the host's game thread died with a StackOverflowError when a seat conceded with one open.
 

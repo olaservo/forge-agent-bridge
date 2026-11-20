@@ -36,16 +36,20 @@ final class AgentGuiGame extends NetworkGuiGame {
     private final Runnable onChange;
     private final AtomicInteger decisionIds = new AtomicInteger();
 
-    volatile String promptMessage = "";
-    volatile CardView promptCard;
-    /** Counts the prompts the host has sent, so a caller can tell a new prompt from the one it has seen, whatever its text. */
-    volatile int promptCount;
-    /** True from the end of one of the seat's inputs until the host's next prompt or buttons. */
-    volatile boolean waiting;
-    volatile String okLabel = "OK";
-    volatile String cancelLabel = "Cancel";
-    volatile boolean okEnabled;
-    volatile boolean cancelEnabled;
+    /**
+     * The prompt and its buttons, replaced whole so a reader sees them together. {@code count} counts the
+     * prompts the host has sent, so a caller can tell a new prompt from the one it has seen, whatever its
+     * text. {@code waiting} is true from the end of one of the seat's inputs until the host's next prompt
+     * or buttons.
+     */
+    record Prompt(String message, CardView card, int count, boolean waiting, String okLabel, String cancelLabel,
+            boolean okEnabled, boolean cancelEnabled) {
+    }
+
+    volatile Prompt prompt = new Prompt("", null, 0, false, "OK", "Cancel", false, false);
+    /** The prompt being built. Written on the Agent-EDT thread only, like every display call. */
+    private Prompt next = prompt;
+    private boolean batching;
     volatile boolean gameFinished;
     volatile int incorrectActions;
     volatile TrackableCollection<PlayerView> myPlayers;
@@ -60,6 +64,13 @@ final class AgentGuiGame extends NetworkGuiGame {
 
     private void changed() {
         onChange.run();
+    }
+
+    private void publish() {
+        if (!batching) {
+            prompt = next;
+            changed();
+        }
     }
 
     // ---- decisions ----
@@ -417,34 +428,34 @@ final class AgentGuiGame extends NetworkGuiGame {
     /** The desktop waits 250 ms before it shows "Waiting for ..." so its buttons do not flicker. Nothing is drawn here. */
     @Override
     public void awaitNextInput() {
-        final int prompts = promptCount;
-        updatePromptForAwait(getCurrentPlayer());
-        promptCount = prompts;
-        waiting = true;
-        changed();
+        // Forge writes "Waiting for ..." as a prompt and then its buttons. Published as one change, and not
+        // counted, since the host sent no prompt.
+        final int prompts = next.count;
+        batching = true;
+        try {
+            updatePromptForAwait(getCurrentPlayer());
+        } finally {
+            batching = false;
+        }
+        next = new Prompt(next.message, next.card, prompts, true, next.okLabel, next.cancelLabel, next.okEnabled, next.cancelEnabled);
+        publish();
     }
 
     @Override
     public void showPromptMessage(final PlayerView playerView, final String message, final CardView card) {
         // Cancels the host's 250 ms timer that would replace this prompt with "Waiting for ...", as the desktop does.
         cancelAwaitNextInput();
-        waiting = false;
-        promptMessage = message == null ? "" : message;
-        promptCard = card;
-        promptCount++;
-        changed();
+        next = new Prompt(message == null ? "" : message, card, next.count + 1, false, next.okLabel, next.cancelLabel,
+                next.okEnabled, next.cancelEnabled);
+        publish();
     }
 
     @Override
     public void updateButtons(final PlayerView owner, final String label1, final String label2, final boolean enable1,
             final boolean enable2, final boolean focus1) {
         cancelAwaitNextInput();
-        waiting = false;
-        okLabel = label1;
-        cancelLabel = label2;
-        okEnabled = enable1;
-        cancelEnabled = enable2;
-        changed();
+        next = new Prompt(next.message, next.card, next.count, false, label1, label2, enable1, enable2);
+        publish();
     }
 
     @Override

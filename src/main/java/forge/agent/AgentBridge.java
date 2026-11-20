@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executors;
 
 import com.google.gson.Gson;
@@ -36,6 +37,7 @@ public final class AgentBridge {
     /** Forge's default port for a hosted lobby. */
     private static final int DEFAULT_HOST_PORT = 36743;
     private static final String DEFAULT_NAME = "Agent";
+    private static final Set<String> LOCAL_HOSTS = Set.of("127.0.0.1", "localhost", "[::1]");
 
     private final AgentSession session = new AgentSession();
     private final Gson gson = new GsonBuilder().serializeNulls().disableHtmlEscaping().create();
@@ -77,6 +79,11 @@ public final class AgentBridge {
 
     private void handle(final HttpExchange ex) throws IOException {
         try {
+            final String refusal = refusal(ex);
+            if (refusal != null) {
+                write(ex, 403, Map.of("error", refusal));
+                return;
+            }
             final URI uri = ex.getRequestURI();
             final String path = uri.getPath();
             final String method = ex.getRequestMethod();
@@ -90,6 +97,22 @@ public final class AgentBridge {
             e.printStackTrace();
             write(ex, 500, Map.of("error", e.toString()));
         }
+    }
+
+    /**
+     * Why a request is not from a local program, or null. A browser sends Origin with a page's POST, and a
+     * page that reaches this port through a DNS name of its own sends that name as Host.
+     */
+    private static String refusal(final HttpExchange ex) {
+        if (ex.getRequestHeaders().getFirst("Origin") != null) {
+            return "requests from a web page are refused";
+        }
+        final String host = ex.getRequestHeaders().getFirst("Host");
+        final String name = host == null ? "" : host.replaceFirst(":\\d+$", "").toLowerCase();
+        if (!LOCAL_HOSTS.contains(name)) {
+            return "the Host header must name 127.0.0.1, localhost or [::1]";
+        }
+        return null;
     }
 
     private Object route(final String method, final String path, final Map<String, String> q, final JsonObject body) throws Exception {
@@ -114,7 +137,7 @@ public final class AgentBridge {
                 session.setReady(!body.has("ready") || body.get("ready").getAsBoolean());
                 return session.lobbySnapshot();
             case "POST /lobby/avatar":
-                session.setAvatar(body.get("index").getAsInt());
+                session.setAvatar(num(body, "index"));
                 return session.lobbySnapshot();
             case "POST /lobby/name": {
                 final String name = str(body, "name", "").trim();
@@ -149,7 +172,7 @@ public final class AgentBridge {
                 session.setAutoPass(str(body, "autoPass", null));
                 return session.gameSnapshot(false);
             case "POST /game/decide": {
-                final int id = body.get("id").getAsInt();
+                final int id = num(body, "id");
                 final List<Integer> indices = new ArrayList<>();
                 if (body.has("choices") && body.get("choices").isJsonArray()) {
                     for (final JsonElement e : body.getAsJsonArray("choices")) {
@@ -244,6 +267,14 @@ public final class AgentBridge {
 
     private static Integer optInt(final JsonObject o, final String key) {
         return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsInt() : null;
+    }
+
+    private static int num(final JsonObject o, final String key) {
+        final Integer value = optInt(o, key);
+        if (value == null) {
+            throw new IllegalArgumentException("missing '" + key + "'");
+        }
+        return value;
     }
 
     private static String str(final JsonObject o, final String key, final String dflt) {
