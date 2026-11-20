@@ -5,7 +5,7 @@
 
     <groupId>io.github.olaservo</groupId>
     <artifactId>forge-agent-bridge</artifactId>
-    <version>0.1.2</version>
+    <version>0.1.3</version>
     <packaging>jar</packaging>
 
     <name>forge-agent-bridge</name>

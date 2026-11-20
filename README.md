@@ -18,7 +18,7 @@ One bridge is one seat. It listens on `127.0.0.1` only and has no authentication
 
 ## Download
 
-The [releases page](https://github.com/olaservo/forge-agent-bridge/releases) has a jar for each Forge version it was built against. The file name ends with that version: `forge-agent-bridge-0.1.2-forge-2.0.16.jar` goes with the [Forge 2.0.16](https://github.com/Card-Forge/forge/releases/tag/forge-2.0.16) desktop release. Each release's notes say what was run against it.
+The [releases page](https://github.com/olaservo/forge-agent-bridge/releases) has a jar for each Forge version it was built against. The file name ends with that version: `forge-agent-bridge-0.1.3-forge-2.0.16.jar` goes with the [Forge 2.0.16](https://github.com/Card-Forge/forge/releases/tag/forge-2.0.16) desktop release. Each release's notes say what was run against it.
 
 For another Forge version, build from source.
 
@@ -28,7 +28,7 @@ For another Forge version, build from source.
 mvn -B package -Dforge.jar=<absolute path to the Forge jar-with-dependencies>
 ```
 
-This writes `target/forge-agent-bridge-0.1.2.jar`.
+This writes `target/forge-agent-bridge-0.1.3.jar`.
 
 ## Run
 
