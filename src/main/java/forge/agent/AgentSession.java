@@ -574,7 +574,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         m.put("lobby", lobbySnapshot());
         m.put("draft", draftSnapshot(false));
         m.put("game", gameSnapshot(false));
-        m.put("chat", tail(chat, 20));
+        final List<String> lines = List.copyOf(chat);
+        m.put("chat", tail(lines, 20));
+        m.put("chatCount", lines.size());
         return m;
     }
 
@@ -714,6 +716,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         m.put("inGame", gv != null && !gui.gameFinished);
         m.put("finished", gui.gameFinished);
         m.put("prompt", gui.promptMessage);
+        m.put("promptCount", gui.promptCount);
+        m.put("waiting", gui.waiting);
         m.put("promptCard", gui.promptCard == null ? null : gui.promptCard.getName());
         final Map<String, Object> buttons = new LinkedHashMap<>();
         buttons.put("ok", gui.okLabel);

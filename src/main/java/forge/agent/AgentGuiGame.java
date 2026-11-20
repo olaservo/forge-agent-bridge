@@ -38,6 +38,10 @@ final class AgentGuiGame extends NetworkGuiGame {
 
     volatile String promptMessage = "";
     volatile CardView promptCard;
+    /** Counts the prompts the host has sent, so a caller can tell a new prompt from the one it has seen, whatever its text. */
+    volatile int promptCount;
+    /** True from the end of one of the seat's inputs until the host's next prompt or buttons. */
+    volatile boolean waiting;
     volatile String okLabel = "OK";
     volatile String cancelLabel = "Cancel";
     volatile boolean okEnabled;
@@ -410,12 +414,24 @@ final class AgentGuiGame extends NetworkGuiGame {
         changed();
     }
 
+    /** The desktop waits 250 ms before it shows "Waiting for ..." so its buttons do not flicker. Nothing is drawn here. */
+    @Override
+    public void awaitNextInput() {
+        final int prompts = promptCount;
+        updatePromptForAwait(getCurrentPlayer());
+        promptCount = prompts;
+        waiting = true;
+        changed();
+    }
+
     @Override
     public void showPromptMessage(final PlayerView playerView, final String message, final CardView card) {
         // Cancels the host's 250 ms timer that would replace this prompt with "Waiting for ...", as the desktop does.
         cancelAwaitNextInput();
+        waiting = false;
         promptMessage = message == null ? "" : message;
         promptCard = card;
+        promptCount++;
         changed();
     }
 
@@ -423,6 +439,7 @@ final class AgentGuiGame extends NetworkGuiGame {
     public void updateButtons(final PlayerView owner, final String label1, final String label2, final boolean enable1,
             final boolean enable2, final boolean focus1) {
         cancelAwaitNextInput();
+        waiting = false;
         okLabel = label1;
         cancelLabel = label2;
         okEnabled = enable1;

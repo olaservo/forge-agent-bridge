@@ -182,7 +182,7 @@ public class AgentGameTest {
                     }
                 }
                 http.post("/game/decide", BridgeHttp.body("id", d.get("id").getAsInt(), "choices", choices, "text", text));
-            } else if (!iHavePriority(g) && g.get("prompt").getAsString().startsWith("Waiting for")) {
+            } else if (!iHavePriority(g) && g.get("waiting").getAsBoolean()) {
                 // The other player is acting; nothing to do. Both signals are needed: the prompt text lags
                 // behind the priority flag, and before the first turn (mulligans) nobody has priority.
             } else if ("Auto".equals(okLabel)) {
@@ -239,6 +239,9 @@ public class AgentGameTest {
         assertFalse(lobby.getSlot(1).isReady(), "lobby resets ready flags after the match");
         final JsonObject end = http.get("/status");
         assertFalse(end.getAsJsonObject("game").get("inGame").getAsBoolean());
+        final int shown = end.getAsJsonArray("chat").size();
+        assertTrue(shown > 0, "our chat line came back: " + end);
+        assertTrue(shown == 20 ? end.get("chatCount").getAsInt() >= 20 : end.get("chatCount").getAsInt() == shown, "chatCount counts every line: " + end);
         http.post("/disconnect", new JsonObject());
     }
 
