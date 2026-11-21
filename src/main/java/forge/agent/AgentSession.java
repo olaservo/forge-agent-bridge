@@ -83,6 +83,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private volatile int highlightsSentForGame;
     /** The turn of ours on which we pressed End Turn, or -1. */
     private volatile int endedTurn = -1;
+    /** The last turn seen in a phase before its end step, and whether it was ours. Read and written under {@code yieldLock}. */
+    private int turnSeen = -1;
+    private boolean turnSeenIsOurs;
 
     /**
      * The host sends its prompt and button labels as text in its own language, and Forge's clients tell them
@@ -363,8 +366,11 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
 
     // ---- game actions ----
 
-    /** Whether the host should be auto-passing for our seat right now, given the mode and whose turn it is. */
-    private boolean wantAutoPass() {
+    /**
+     * Whether the host should be auto-passing for our seat right now, given the mode and whose turn it is.
+     * {@code current} is what the host was last told for this game.
+     */
+    private boolean wantAutoPass(final boolean current) {
         if (AUTO_PASS_ALWAYS.equals(autoPass)) {
             return true;
         }
@@ -374,12 +380,22 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             return false;
         }
         final PhaseType phase = gv.getPhase();
-        if (gv.getPlayerTurn().getId() == me.getId()) {
+        final int turn = gv.getTurn();
+        final boolean ending = phase == PhaseType.END_OF_TURN || phase == PhaseType.CLEANUP;
+        if (phase != null && !ending) {
+            turnSeen = turn;
+            turnSeenIsOurs = gv.getPlayerTurn().getId() == me.getId();
+        } else if (turn != turnSeen) {
+            // The host sends the turn and its player before the phase, so as a turn begins the view still
+            // shows the last turn's cleanup step. Nothing changes until the new turn's first phase is here.
+            return current;
+        }
+        if (turnSeenIsOurs) {
             // On from End Turn or our cleanup step, so it is in place by the opponent's upkeep.
-            return phase == PhaseType.CLEANUP || gv.getTurn() == endedTurn;
+            return phase == PhaseType.CLEANUP || turn == endedTurn;
         }
         // Switch off before the opponent's turn ends, so the setting has reached the host by our main phase.
-        return phase != PhaseType.END_OF_TURN && phase != PhaseType.CLEANUP;
+        return !ending;
     }
 
     /**
@@ -402,6 +418,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
         if (game != yieldSentForGame) {
             endedTurn = -1;
+            turnSeen = -1;
         }
         if (game != highlightsSentForGame) {
             highlightsSentForGame = game;
@@ -412,7 +429,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
                 System.err.println("[agent] could not ask for actionable cards: " + e);
             }
         }
-        final boolean want = wantAutoPass();
+        final boolean want = wantAutoPass(game == yieldSentForGame && yieldSent);
         if (!force && game == yieldSentForGame && want == yieldSent) {
             return;
         }
