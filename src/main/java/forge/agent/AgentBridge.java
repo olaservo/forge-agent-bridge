@@ -19,6 +19,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -91,6 +92,8 @@ public final class AgentBridge {
             final JsonObject body = "POST".equals(method) ? readBody(ex.getRequestBody()) : new JsonObject();
             final Object result = route(method, path, query, body);
             write(ex, 200, result);
+        } catch (final JsonParseException e) {
+            write(ex, 400, Map.of("error", "the request body is not JSON"));
         } catch (final IllegalArgumentException | IllegalStateException e) {
             write(ex, 400, Map.of("error", String.valueOf(e.getMessage())));
         } catch (final Exception e) {
