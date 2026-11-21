@@ -74,7 +74,7 @@ All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 - `POST /connect {host, port, name}`, `POST /disconnect`
 - `POST /sit {host, port, name, deck}`, `{..., deckFile}` or `{..., dck}`: connect, wait for the slot and, with a deck, send it and ready. `deck` is a name, `deckFile` a path to a `.dck` file, `dck` the file's text. Answers like `/status`, with the slot assigned. An unknown deck fails before a seat is taken.
 - `POST /lobby/ready {ready}`, `POST /lobby/avatar {index}`, `POST /lobby/name {name}`, `POST /lobby/deck {name}` or `{dck}`. `name` renames the seated player, so a seat taken by auto-join under a placeholder name can be named later.
-- `POST /chat {text}`
+- `POST /chat {text}`. `chat` in the status holds the last 20 lines as `{from, text}`, with `from` null for a line from the host itself, and `chatCount` counts them all.
 - `GET /draft/pack`, `POST /draft/pick {card}`, `GET /draft/pool`
 - `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}` or `{id, amounts}`, `POST /game/yield {autoPass}`
 

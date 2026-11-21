@@ -1,0 +1,388 @@
+package forge.agent;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import forge.deck.Deck;
+import forge.deck.DeckSection;
+import forge.game.GameView;
+import forge.game.card.CardView;
+import forge.game.card.CardView.CardStateView;
+import forge.game.combat.CombatView;
+import forge.game.player.PlayerView;
+import forge.game.spellability.StackItemView;
+import forge.game.zone.ZoneType;
+import forge.gamemodes.match.GameLobby.GameLobbyData;
+import forge.gamemodes.match.LobbySlot;
+import forge.gamemodes.match.Selection;
+import forge.gamemodes.net.EventParticipant;
+import forge.gamemodes.net.NetworkEventView;
+import forge.gamemodes.net.client.ClientGameLobby;
+import forge.item.PaperCard;
+import forge.trackable.TrackableObject;
+import forge.util.collect.FCollection;
+import forge.util.collect.FCollectionView;
+
+/**
+ * The JSON payloads the bridge answers with, as maps in the order their fields are sent. The MCP server's
+ * output schemas name the same fields, and its fixture test fails when the two differ.
+ */
+final class Snapshots {
+
+    private Snapshots() {
+    }
+
+    static Map<String, Object> lobby(final GameLobbyData d, final ClientGameLobby lobby, final int mySlot) {
+        final Map<String, Object> m = new LinkedHashMap<>();
+        m.put("mySlot", mySlot);
+        if (d == null) {
+            return m;
+        }
+        m.put("limitedMode", d.isLimitedMode());
+        m.put("activeEventId", d.getActiveEventId());
+        m.put("formatName", d.getFormatName());
+        final List<Map<String, Object>> slots = new ArrayList<>();
+        for (int i = 0; i < lobby.getNumberOfSlots(); i++) {
+            final LobbySlot s = lobby.getSlot(i);
+            final Map<String, Object> sm = new LinkedHashMap<>();
+            sm.put("index", i);
+            sm.put("type", s.getType().name());
+            sm.put("name", s.getName());
+            sm.put("ready", s.isReady());
+            sm.put("avatar", s.getAvatarIndex());
+            sm.put("team", s.getTeam());
+            sm.put("deckName", s.getDeckName());
+            sm.put("hasDeck", s.getDeck() != null);
+            slots.add(sm);
+        }
+        m.put("slots", slots);
+        final NetworkEventView ev = d.getEventView();
+        if (ev != null) {
+            final Map<String, Object> em = new LinkedHashMap<>();
+            em.put("eventId", ev.getEventId());
+            em.put("format", ev.getFormat() == null ? null : ev.getFormat().name());
+            em.put("phase", ev.getPhase() == null ? null : ev.getPhase().name());
+            em.put("product", ev.getProductDescription());
+            em.put("podSize", ev.getPodSize());
+            em.put("numRounds", ev.getNumRounds());
+            em.put("pickTimerSeconds", ev.getPickTimerSeconds());
+            final List<Map<String, Object>> ps = new ArrayList<>();
+            for (final EventParticipant p : ev.getParticipants()) {
+                final Map<String, Object> pm = new LinkedHashMap<>();
+                pm.put("name", p.getName());
+                pm.put("type", p.getType().name());
+                pm.put("seat", p.getSeatIndex());
+                pm.put("lobbySlot", p.getLobbySlotIndex());
+                ps.add(pm);
+            }
+            em.put("participants", ps);
+            m.put("event", em);
+        }
+        return m;
+    }
+
+    static Map<String, Object> draft(final DraftState d, final List<String> picks, final List<String> autoPicks, final boolean withCards) {
+        final Map<String, Object> m = new LinkedHashMap<>();
+        m.put("seatIndex", d.seatIndex());
+        m.put("packNumber", d.packNumber());
+        m.put("pickNumber", d.pickNumber());
+        m.put("timerSeconds", d.timerSeconds());
+        m.put("pickPending", d.pickPending());
+        final List<PaperCard> pack = d.pack();
+        m.put("packSize", pack == null ? 0 : pack.size());
+        if (withCards && pack != null) {
+            final List<Map<String, Object>> cards = new ArrayList<>();
+            int i = 0;
+            for (final PaperCard pc : pack) {
+                final Map<String, Object> cm = describe(pc);
+                cm.put("index", i++);
+                cards.add(cm);
+            }
+            m.put("pack", cards);
+        }
+        m.put("seatQueueDepths", d.seatQueueDepths());
+        m.put("picks", new ArrayList<>(picks));
+        m.put("autoPicks", new ArrayList<>(autoPicks));
+        m.put("poolReceived", d.pool() != null);
+        m.put("poolEventId", d.poolEventId());
+        m.put("poolPath", d.poolPath());
+        return m;
+    }
+
+    static Map<String, Object> pool(final DraftState draft) {
+        final Deck d = draft.pool();
+        final Map<String, Object> m = new LinkedHashMap<>();
+        if (d == null) {
+            m.put("poolReceived", false);
+            return m;
+        }
+        m.put("poolReceived", true);
+        m.put("eventId", draft.poolEventId());
+        m.put("name", d.getName());
+        m.put("path", draft.poolPath());
+        m.put("tags", new ArrayList<>(d.getTags()));
+        // Forge delivers a drafted pool with every pick in the Sideboard section and an empty Main.
+        m.put("size", d.getAllCardsInASinglePool().countAll());
+        m.put("mainSize", d.getMain().countAll());
+        m.put("sideboardSize", d.has(DeckSection.Sideboard) ? d.get(DeckSection.Sideboard).countAll() : 0);
+        final List<Map<String, Object>> cards = new ArrayList<>();
+        for (final DeckSection section : DeckSection.values()) {
+            if (!d.has(section)) {
+                continue;
+            }
+            for (final PaperCard pc : d.get(section).toFlatList()) {
+                final Map<String, Object> cm = describe(pc);
+                cm.put("section", section.name());
+                cards.add(cm);
+            }
+        }
+        m.put("cards", cards);
+        return m;
+    }
+
+    static Map<String, Object> describe(final PaperCard pc) {
+        final Map<String, Object> m = new LinkedHashMap<>();
+        m.put("name", pc.getName());
+        m.put("set", pc.getEdition());
+        m.put("collectorNumber", pc.getCollectorNumber());
+        m.put("rarity", pc.getRarity() == null ? null : pc.getRarity().name());
+        if (pc.getRules() != null) {
+            m.put("manaCost", String.valueOf(pc.getRules().getManaCost()));
+            m.put("type", String.valueOf(pc.getRules().getType()));
+            m.put("colors", String.valueOf(pc.getRules().getColor()));
+            m.put("power", pc.getRules().getPower());
+            m.put("toughness", pc.getRules().getToughness());
+            m.put("oracle", pc.getRules().getOracleText());
+        }
+        return m;
+    }
+
+    /** The auto-pass fields of a game snapshot: the mode, and whether the host is passing for the seat now. */
+    record AutoPass(String mode, boolean now) {
+    }
+
+    /**
+     * The game as the seat sees it. Without {@code full} it is the summary an action returns: the prompt,
+     * the buttons, a pending decision and whose turn it is.
+     */
+    static Map<String, Object> game(final AgentGuiGame gui, final String priorityPrefix, final AutoPass autoPass, final boolean full) {
+        final Map<String, Object> m = new LinkedHashMap<>();
+        final GameView gv = gui.getGameView();
+        m.put("inGame", gv != null && !gui.gameFinished);
+        m.put("finished", gui.gameFinished);
+        final AgentGuiGame.Prompt prompt = gui.prompt;
+        m.put("prompt", prompt.message());
+        m.put("promptCount", prompt.count());
+        m.put("waiting", prompt.waiting());
+        m.put("priorityPrompt", prompt.message().startsWith(priorityPrefix));
+        m.put("promptCard", prompt.card() == null ? null : prompt.card().getName());
+        final Map<String, Object> buttons = new LinkedHashMap<>();
+        buttons.put("ok", prompt.okLabel());
+        buttons.put("okEnabled", prompt.okEnabled());
+        buttons.put("cancel", prompt.cancelLabel());
+        buttons.put("cancelEnabled", prompt.cancelEnabled());
+        m.put("buttons", buttons);
+        m.put("incorrectActions", gui.incorrectActions);
+        final PendingDecision d = gui.pending;
+        if (d != null && !d.isAnswered()) {
+            final Map<String, Object> dm = new LinkedHashMap<>();
+            dm.put("id", d.id);
+            dm.put("kind", d.kind);
+            dm.put("prompt", d.prompt);
+            dm.put("options", d.options);
+            dm.put("min", d.min);
+            dm.put("max", d.max);
+            dm.put("default", d.defaultAnswer);
+            if (d.amount != null) {
+                dm.put("amount", d.amount);
+            }
+            m.put("pendingDecision", dm);
+        }
+        m.put("messages", tail(gui.messages, 10));
+        if (gv == null) {
+            return m;
+        }
+        m.put("turn", gv.getTurn());
+        m.put("phase", gv.getPhase() == null ? null : gv.getPhase().name());
+        m.put("activePlayer", gv.getPlayerTurn() == null ? null : gv.getPlayerTurn().getName());
+        m.put("gameOver", gv.isGameOver());
+        m.put("winner", gv.getWinningPlayerName());
+        final PlayerView me = gui.getCurrentPlayer();
+        m.put("me", me == null ? null : me.getName());
+        // The host sends no new prompt when it passes for us, so a "Priority: ..." prompt can outlive our priority.
+        m.put("hasPriority", me == null ? null : me.getHasPriority());
+        m.put("autoPass", autoPass.mode());
+        m.put("autoPassNow", autoPass.now());
+        if (!full) {
+            return m;
+        }
+        // The game view arrives a moment before the host fills it in. Until then its players and stack are null.
+        final FCollectionView<PlayerView> seats = gv.getPlayers();
+        final FCollectionView<StackItemView> items = gv.getStack();
+        final List<Map<String, Object>> players = new ArrayList<>();
+        for (final PlayerView p : seats == null ? List.<PlayerView>of() : seats) {
+            final Map<String, Object> pm = new LinkedHashMap<>();
+            pm.put("id", p.getId());
+            pm.put("name", p.getName());
+            pm.put("life", p.getLife());
+            pm.put("hasPriority", p.getHasPriority());
+            pm.put("isMe", me != null && me.getId() == p.getId());
+            pm.put("handSize", p.getZoneSize(ZoneType.Hand));
+            pm.put("librarySize", p.getZoneSize(ZoneType.Library));
+            pm.put("graveyardSize", p.getZoneSize(ZoneType.Graveyard));
+            pm.put("exileSize", p.getZoneSize(ZoneType.Exile));
+            pm.put("battlefield", cards(p.getBattlefield()));
+            pm.put("graveyard", cards(p.getGraveyard()));
+            if (me != null && me.getId() == p.getId()) {
+                pm.put("hand", cards(p.getHand()));
+            }
+            players.add(pm);
+        }
+        m.put("players", players);
+        final List<Map<String, Object>> stack = new ArrayList<>();
+        for (final StackItemView si : items == null ? List.<StackItemView>of() : items) {
+            final Map<String, Object> sm = new LinkedHashMap<>();
+            sm.put("id", si.getId());
+            sm.put("source", si.getSourceCard() == null ? null : si.getSourceCard().getName());
+            sm.put("by", si.getActivatingPlayer() == null ? null : si.getActivatingPlayer().getName());
+            sm.put("text", si.getText());
+            stack.add(sm);
+        }
+        m.put("stack", stack);
+        final CombatView combat = gv.getCombat();
+        if (combat != null) {
+            m.put("combat", combat(combat));
+        }
+        final Selection sel = gui.getSelection();
+        if (sel != null) {
+            putSelection(m, sel);
+        }
+        return m;
+    }
+
+    private static List<Map<String, Object>> combat(final CombatView combat) {
+        final List<Map<String, Object>> attacks = new ArrayList<>();
+        for (final CardView a : combat.getAttackers()) {
+            final Map<String, Object> am = new LinkedHashMap<>();
+            am.put("attacker", a.getName());
+            am.put("attackerId", a.getId());
+            am.put("defender", combat.getDefender(a) == null ? null : combat.getDefender(a).getName());
+            // The host lists blockers as declared only once the block is final. Until then they are planned.
+            final FCollection<CardView> declared = combat.getBlockers(a);
+            final FCollection<CardView> planned = combat.getPlannedBlockers(a);
+            final List<String> blockers = new ArrayList<>();
+            for (final CardView b : declared != null && !declared.isEmpty() ? declared : planned == null ? List.<CardView>of() : planned) {
+                blockers.add(b.getName() + "#" + b.getId());
+            }
+            am.put("blockers", blockers);
+            am.put("blocked", declared != null && !declared.isEmpty());
+            attacks.add(am);
+        }
+        return attacks;
+    }
+
+    /**
+     * What the current prompt accepts: cards, including ones in zones the state does not list (a library
+     * search), and players. "chosen" is what is picked so far, or the attacker being blocked.
+     */
+    private static void putSelection(final Map<String, Object> m, final Selection sel) {
+        final List<Map<String, Object>> offered = new ArrayList<>();
+        for (final CardView cv : sel.cards()) {
+            if (cv != null) {
+                offered.add(describe(cv));
+            }
+        }
+        final List<Map<String, Object>> targetPlayers = entities(sel.targets(), true);
+        final List<Map<String, Object>> chosen = entities(sel.chosen(), false);
+        // The host's hint at what can act now: cards that can be played, attack, block or pay.
+        final List<Map<String, Object>> actionable = new ArrayList<>();
+        final Set<Integer> listed = new HashSet<>();
+        for (final CardView cv : sel.actionable()) {
+            if (cv != null && listed.add(cv.getId())) {
+                final Map<String, Object> am = new LinkedHashMap<>();
+                am.put("id", cv.getId());
+                am.put("name", cv.getName());
+                actionable.add(am);
+            }
+        }
+        if (!actionable.isEmpty()) {
+            m.put("actionable", actionable);
+        }
+        if (!offered.isEmpty() || !targetPlayers.isEmpty() || !chosen.isEmpty()) {
+            final Map<String, Object> sm = new LinkedHashMap<>();
+            sm.put("min", sel.min());
+            sm.put("max", sel.max());
+            sm.put("cards", offered);
+            sm.put("players", targetPlayers);
+            sm.put("chosen", chosen);
+            m.put("selection", sm);
+        }
+    }
+
+    /** Players and cards among a selection's objects, as id, name and type. Stack items are left out. */
+    private static List<Map<String, Object>> entities(final List<TrackableObject> objects, final boolean playersOnly) {
+        final List<Map<String, Object>> out = new ArrayList<>();
+        for (final TrackableObject o : objects) {
+            final boolean player = o instanceof PlayerView;
+            if (!player && (playersOnly || !(o instanceof CardView))) {
+                continue;
+            }
+            final Map<String, Object> em = new LinkedHashMap<>();
+            em.put("type", player ? "player" : "card");
+            em.put("id", o.getId());
+            em.put("name", player ? ((PlayerView) o).getName() : ((CardView) o).getName());
+            out.add(em);
+        }
+        return out;
+    }
+
+    private static List<Map<String, Object>> cards(final FCollectionView<CardView> cards) {
+        final List<Map<String, Object>> out = new ArrayList<>();
+        if (cards == null) {
+            return out;
+        }
+        for (final CardView cv : cards) {
+            out.add(describe(cv));
+        }
+        return out;
+    }
+
+    static Map<String, Object> describe(final CardView cv) {
+        final Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", cv.getId());
+        m.put("name", cv.getName());
+        m.put("zone", cv.getZone() == null ? null : cv.getZone().name());
+        m.put("controller", cv.getController() == null ? null : cv.getController().getName());
+        m.put("tapped", cv.isTapped());
+        m.put("sick", cv.isSick());
+        m.put("attacking", cv.isAttacking());
+        m.put("blocking", cv.isBlocking());
+        m.put("damage", cv.getDamage());
+        m.put("token", cv.isToken());
+        m.put("faceDown", cv.isFaceDown());
+        if (cv.isPhasedOut()) {
+            // Still listed in its zone, but treated as though it does not exist until it phases in.
+            m.put("phasedOut", true);
+        }
+        final CardStateView st = cv.getCurrentState();
+        if (st != null) {
+            m.put("type", String.valueOf(st.getType()));
+            m.put("manaCost", String.valueOf(st.getManaCost()));
+            if (st.isCreature()) {
+                m.put("power", st.getPower());
+                m.put("toughness", st.getToughness());
+            }
+            m.put("text", st.getAbilityText());
+        }
+        return m;
+    }
+
+    static <T> List<T> tail(final List<T> list, final int n) {
+        final int size = list.size();
+        return new ArrayList<>(list.subList(Math.max(0, size - n), size));
+    }
+}
