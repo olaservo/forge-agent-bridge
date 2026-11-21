@@ -18,7 +18,6 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import forge.game.zone.ZoneType;
-import forge.localinstance.properties.ForgePreferences.FPref;
 
 /**
  * Scry reaches the seat as a decision, and the answer is what the host does. The deck is 20
@@ -40,8 +39,7 @@ public class AgentScryTest {
 
     @BeforeClass
     public void initializeModel() {
-        // The desktop default. With it on, the host sends scry through manipulateCardList.
-        RiggedMatch.initializeModel(preferences -> preferences.setPref(FPref.UI_SELECT_FROM_CARD_DISPLAYS, true));
+        RiggedMatch.initializeModel();
     }
 
     @AfterClass(alwaysRun = true)
@@ -53,7 +51,7 @@ public class AgentScryTest {
 
     @Test(timeOut = 300_000)
     public void agentChoosesWhatAScryKeepsOnTop() throws Exception {
-        match = new RiggedMatch(DECK);
+        match = new RiggedMatch(DECK, RiggedMatch.deck("Host lands", "40 Forest"));
         final List<Integer> looked = new ArrayList<>();
         final long deadline = System.currentTimeMillis() + 240_000;
         while (looked.isEmpty()) {

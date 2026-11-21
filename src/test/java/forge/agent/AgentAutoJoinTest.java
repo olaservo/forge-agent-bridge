@@ -16,11 +16,7 @@ import forge.gamemodes.match.LobbySlot;
 import forge.gamemodes.match.LobbySlotType;
 import forge.gamemodes.net.server.FServerManager;
 import forge.gamemodes.net.server.ServerGameLobby;
-import forge.gui.GuiBase;
 import forge.interfaces.IUpdateable;
-import forge.localinstance.properties.ForgeNetPreferences.FNetPref;
-import forge.localinstance.properties.ForgePreferences.FPref;
-import forge.model.FModel;
 
 /**
  * The sit-down call and auto-join against an in-process host. Both ports are picked free at run time,
@@ -44,14 +40,7 @@ public class AgentAutoJoinTest {
 
     @BeforeClass
     public void initializeModel() {
-        GuiBase.setInterface(new AgentGuiBase());
-        FModel.initialize(null, preferences -> {
-            preferences.setPref(FPref.LOAD_CARD_SCRIPTS_LAZILY, false);
-            preferences.setPref(FPref.UI_LANGUAGE, "en-US");
-            preferences.setPref(FPref.PLAYER_NAME, "HostAI");
-            return null;
-        });
-        FModel.getNetPreferences().setPref(FNetPref.UPnP, "NEVER");
+        RiggedMatch.initializeModel();
     }
 
     @AfterMethod(alwaysRun = true)

@@ -155,8 +155,9 @@ public class AgentCombatTest {
         final int turnOfSplit = splitTurn;
         if (match.http.get("/game").get("turn").getAsInt() == turnOfSplit) {
             final long until = System.currentTimeMillis() + 60_000;
-            while (System.currentTimeMillis() < until) {
+            while (true) {
                 final JsonObject g = match.next();
+                assertTrue(System.currentTimeMillis() < until, "the combat with the split did not end; last state " + g);
                 if (g.get("gameOver").getAsBoolean() || g.get("turn").getAsInt() != turnOfSplit || RiggedMatch.str(g.get("phase")).startsWith("MAIN2")
                         || RiggedMatch.str(g.get("phase")).equals("END_OF_TURN")) {
                     break;

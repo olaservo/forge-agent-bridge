@@ -8,7 +8,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Consumer;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -27,7 +26,6 @@ import forge.gamemodes.net.server.ServerGameLobby;
 import forge.gui.GuiBase;
 import forge.interfaces.IUpdateable;
 import forge.localinstance.properties.ForgeNetPreferences.FNetPref;
-import forge.localinstance.properties.ForgePreferences;
 import forge.localinstance.properties.ForgePreferences.FPref;
 import forge.model.FModel;
 
@@ -50,13 +48,8 @@ final class RiggedMatch {
     private long seen = -1;
     private int quiet;
 
+    /** Forge's model with the preferences the tests rely on, whatever the Forge profile on this machine holds. */
     static void initializeModel() {
-        initializeModel(preferences -> {
-        });
-    }
-
-    /** {@code more} sets a test's own preferences along with the shared ones. */
-    static void initializeModel(final Consumer<ForgePreferences> more) {
         GuiBase.setInterface(new AgentGuiBase());
         FModel.initialize(null, preferences -> {
             preferences.setPref(FPref.LOAD_CARD_SCRIPTS_LAZILY, false);
@@ -64,7 +57,9 @@ final class RiggedMatch {
             preferences.setPref(FPref.PLAYER_NAME, HOST); // a blank name pops a Swing input dialog at match start
             preferences.setPref(FPref.UI_ENABLE_SOUNDS, false);
             preferences.setPref(FPref.UI_ENABLE_MUSIC, false);
-            more.accept(preferences);
+            // The desktop default. With it on, the host sends scry through manipulateCardList and a library
+            // search as a selection.
+            preferences.setPref(FPref.UI_SELECT_FROM_CARD_DISPLAYS, true);
             return null;
         });
         FModel.getNetPreferences().setPref(FNetPref.UPnP, "NEVER");

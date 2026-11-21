@@ -1,6 +1,7 @@
 package forge.agent;
 
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.assertNotNull;
 
 import java.io.File;
@@ -39,11 +40,7 @@ import forge.gamemodes.match.LobbySlotType;
 import forge.gamemodes.match.input.Input;
 import forge.gamemodes.net.server.FServerManager;
 import forge.gamemodes.net.server.ServerGameLobby;
-import forge.gui.GuiBase;
 import forge.interfaces.IUpdateable;
-import forge.localinstance.properties.ForgeNetPreferences.FNetPref;
-import forge.localinstance.properties.ForgePreferences.FPref;
-import forge.model.FModel;
 import forge.player.PlayerControllerHuman;
 
 /**
@@ -121,16 +118,7 @@ public class AgentSoakTest {
         if (games <= 0) {
             throw new SkipException("soak test is off; run with -Dagent.soak.games=<n>");
         }
-        GuiBase.setInterface(new AgentGuiBase());
-        FModel.initialize(null, preferences -> {
-            preferences.setPref(FPref.LOAD_CARD_SCRIPTS_LAZILY, false);
-            preferences.setPref(FPref.UI_LANGUAGE, "en-US");
-            preferences.setPref(FPref.PLAYER_NAME, "HostAI");
-            preferences.setPref(FPref.UI_ENABLE_SOUNDS, false);
-            preferences.setPref(FPref.UI_ENABLE_MUSIC, false);
-            return null;
-        });
-        FModel.getNetPreferences().setPref(FNetPref.UPnP, "NEVER");
+        RiggedMatch.initializeModel();
     }
 
     @AfterClass(alwaysRun = true)
@@ -182,6 +170,7 @@ public class AgentSoakTest {
             Thread.setDefaultUncaughtExceptionHandler(before);
             writeReport();
         }
+        assertTrue(comparisons > 0, "the bridge's state was compared with the host's at least once");
         assertEquals(mismatches, List.of(), "the bridge's state agrees with the host's");
         assertEquals(deadPrompts, List.of(), "whenever the host waits on the seat, the bridge shows something to answer");
         assertEquals(refusedSelections, List.of(), "every card offered in selection is accepted");
@@ -636,19 +625,6 @@ public class AgentSoakTest {
                 continue;
             }
             return card;
-        }
-        return null;
-    }
-
-    private static JsonObject untappedCreature(final JsonObject me) {
-        if (me == null) {
-            return null;
-        }
-        for (final JsonElement c : me.getAsJsonArray("battlefield")) {
-            final JsonObject card = c.getAsJsonObject();
-            if (str(card.get("type")).contains("Creature") && !card.get("tapped").getAsBoolean()) {
-                return card;
-            }
         }
         return null;
     }

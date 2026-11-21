@@ -1,9 +1,14 @@
 package forge.agent;
 
+import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
 
 import java.io.IOException;
 import java.net.Socket;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 
 import org.testng.annotations.AfterMethod;
@@ -46,6 +51,16 @@ public class AgentHttpTest {
         final String answer = request(port, "POST /lobby/avatar", "Host: 127.0.0.1:" + port);
         assertStatus(400, answer);
         assertTrue(answer.contains("missing 'index'"), answer);
+    }
+
+    @Test(timeOut = 60_000)
+    public void aBodyThatIsNotJsonIsTheCallersMistake() throws Exception {
+        bridge = new AgentBridge();
+        bridge.start(0);
+        final HttpRequest req = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + bridge.port() + "/chat"))
+                .POST(HttpRequest.BodyPublishers.ofString("{\"text\": ")).build();
+        final HttpResponse<String> res = HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
+        assertEquals(res.statusCode(), 400, res.body());
     }
 
     private static void assertStatus(final int status, final String answer) {

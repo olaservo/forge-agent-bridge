@@ -71,12 +71,11 @@ public class AgentChooseCardsTest {
                     picked.add(c.getAsJsonObject().get("id").getAsInt());
                     match.act("selectCard", c.getAsJsonObject().get("id").getAsInt());
                 }
-                if (picked.size() == 2 && !g.has("checked")) {
+                if (picked.size() == 2 && picked.get(1) == c.getAsJsonObject().get("id").getAsInt()) {
                     final JsonObject two = match.http.get("/game");
                     match.http.record("GET /game#requiredTwoChosen", two);
                     assertEquals(two.getAsJsonObject("selection").getAsJsonArray("chosen").size(), 2, "two are chosen: " + two.get("selection"));
                     assertFalse(two.getAsJsonObject("buttons").get("okEnabled").getAsBoolean(), "OK is still off: " + two.get("buttons"));
-                    g.addProperty("checked", true);
                 }
             }
         }

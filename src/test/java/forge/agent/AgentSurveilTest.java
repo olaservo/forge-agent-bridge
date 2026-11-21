@@ -51,7 +51,7 @@ public class AgentSurveilTest {
 
     @Test(timeOut = 300_000)
     public void agentChoosesWhatASurveilPutsInTheGraveyard() throws Exception {
-        match = new RiggedMatch(DECK);
+        match = new RiggedMatch(DECK, RiggedMatch.deck("Host lands", "40 Forest"));
         final List<Integer> looked = new ArrayList<>();
         final long deadline = System.currentTimeMillis() + 240_000;
         while (looked.isEmpty()) {
