@@ -44,7 +44,7 @@ public class AgentRevealTest {
 
     @Test(timeOut = 300_000)
     public void aRevealIsShownAndTheGameGoesOn() throws Exception {
-        match = new RiggedMatch(DECK);
+        match = new RiggedMatch(DECK, RiggedMatch.deck("Host lands", "40 Forest"));
         final Set<Integer> attacked = new HashSet<>();
         String revealed = null;
         int revealTurn = -1;

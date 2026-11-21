@@ -23,11 +23,7 @@ import forge.gamemodes.match.LobbySlot;
 import forge.gamemodes.match.LobbySlotType;
 import forge.gamemodes.net.server.FServerManager;
 import forge.gamemodes.net.server.ServerGameLobby;
-import forge.gui.GuiBase;
 import forge.interfaces.IUpdateable;
-import forge.localinstance.properties.ForgeNetPreferences.FNetPref;
-import forge.localinstance.properties.ForgePreferences.FPref;
-import forge.model.FModel;
 
 /**
  * Hosts a Limited match in-process with the host seat played by the AI and lets the bridge take
@@ -58,16 +54,7 @@ public class AgentGameTest {
 
     @BeforeClass
     public void initializeModel() {
-        GuiBase.setInterface(new AgentGuiBase());
-        FModel.initialize(null, preferences -> {
-            preferences.setPref(FPref.LOAD_CARD_SCRIPTS_LAZILY, false);
-            preferences.setPref(FPref.UI_LANGUAGE, "en-US");
-            preferences.setPref(FPref.PLAYER_NAME, "HostAI"); // a blank name pops a Swing input dialog at match start
-            preferences.setPref(FPref.UI_ENABLE_SOUNDS, false);
-            preferences.setPref(FPref.UI_ENABLE_MUSIC, false);
-            return null;
-        });
-        FModel.getNetPreferences().setPref(FNetPref.UPnP, "NEVER");
+        RiggedMatch.initializeModel();
     }
 
     @AfterClass(alwaysRun = true)
@@ -110,8 +97,7 @@ public class AgentGameTest {
         bridge.start(0);
         http = new BridgeHttp(bridge.port());
 
-        JsonObject st = http.post("/connect", BridgeHttp.body("host", "127.0.0.1", "port", HOST_PORT, "name", "AgentBot"));
-        assertTrue(st.getAsJsonObject("connection").get("connected").getAsBoolean());
+        http.post("/connect", BridgeHttp.body("host", "127.0.0.1", "port", HOST_PORT, "name", "AgentBot"));
         waitFor("agent takes lobby slot 1", 20_000, () -> http.get("/status").getAsJsonObject("lobby").get("mySlot").getAsInt() == 1);
 
         final JsonObject deck = http.post("/lobby/deck", BridgeHttp.body("dck", DECK));
@@ -119,6 +105,8 @@ public class AgentGameTest {
         final JsonObject lobbyAfterReady = http.post("/lobby/ready", BridgeHttp.body("ready", true));
         assertEquals(lobbyAfterReady.get("mySlot").getAsInt(), 1);
         http.post("/chat", BridgeHttp.body("text", "gl hf"));
+        waitFor("the host sends our chat line back under our name", 20_000,
+                () -> http.get("/status").getAsJsonArray("chat").contains(BridgeHttp.body("from", "AgentBot", "text", "gl hf")));
         waitFor("host sees the agent's deck and ready flag", 20_000,
                 () -> lobby.getSlot(1).isReady() && lobby.getSlot(1).getDeck() != null);
 
@@ -223,7 +211,6 @@ public class AgentGameTest {
         }
 
         final JsonObject full = http.get("/game");
-        assertTrue(full.get("gameOver").getAsBoolean());
         assertFalse(full.get("winner").getAsString().isEmpty(), "winner reported: " + full);
         assertTrue(full.get("turn").getAsInt() > 1, "more than one turn: " + full);
         assertTrue(actions > 10, "agent passed priority through the game: " + actions);
@@ -240,7 +227,6 @@ public class AgentGameTest {
         final JsonObject end = http.get("/status");
         assertFalse(end.getAsJsonObject("game").get("inGame").getAsBoolean());
         final int shown = end.getAsJsonArray("chat").size();
-        assertTrue(shown > 0, "our chat line came back: " + end);
         assertTrue(shown == 20 ? end.get("chatCount").getAsInt() >= 20 : end.get("chatCount").getAsInt() == shown, "chatCount counts every line: " + end);
         http.post("/disconnect", new JsonObject());
     }

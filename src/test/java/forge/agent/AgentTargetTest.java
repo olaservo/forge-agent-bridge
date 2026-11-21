@@ -63,7 +63,8 @@ public class AgentTargetTest {
                 final JsonObject g = match.next();
                 assertTrue(System.currentTimeMillis() < deadline, "not finished in time; last state " + g);
                 assertFalse(g.get("gameOver").getAsBoolean(), "the game ended early: " + g);
-                if (!shocked && match.hostLife(RiggedMatch.HOST) <= lifeAtStart - 2) {
+                if (!shocked && match.hostLife(RiggedMatch.HOST) < lifeAtStart) {
+                    assertEquals(match.hostLife(RiggedMatch.HOST), lifeAtStart - 2, "the first Shock hit the player it was aimed at");
                     shocked = true;
                 }
                 final JsonObject sel = g.has("selection") ? g.getAsJsonObject("selection") : null;
@@ -89,8 +90,6 @@ public class AgentTargetTest {
                     break; // a target prompt that offers a card is open
                 }
             }
-            assertEquals(match.hostLife(RiggedMatch.HOST), lifeAtStart - 2, "the first Shock hit the player it was aimed at");
-
             match.act("concede", null);
             AgentGameTest.waitFor("the game ends on the concession", 30_000, () -> match.http.get("/game").get("gameOver").getAsBoolean());
             Thread.sleep(3_000); // the overflow followed the end of the game by a moment
