@@ -88,7 +88,7 @@ It prints `MATCH_HOST_READY port=36743` once the card database has loaded. `--se
 
 All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 
-- `GET /status`: everything about the seat. `GET /wait?since=<revision>&timeout=<seconds>` blocks until the revision passes `since`.
+- `GET /status`: everything about the seat. `GET /wait?since=<revision>&timeout=<seconds>` blocks until the revision passes `since`. While Forge's client retries a dropped connection, `connection.connected` stays true and `connection.reconnectState` is `RECONNECTING`. Once it stops, or the host closes the connection, `connected` is false, `closeReason` says why and `lobby` holds only `mySlot: -1`.
 - `POST /connect {host, port, name}`, `POST /disconnect`
 - `POST /sit {host, port, name, deck}`, `{..., deckFile}` or `{..., dck}`: connect, wait for the slot and, with a deck, send it and ready. `deck` is a name, `deckFile` a path to a `.dck` file, `dck` the file's text. Answers like `/status`, with the slot assigned. An unknown deck fails before a seat is taken.
 - `POST /lobby/ready {ready}`, `POST /lobby/avatar {index}`, `POST /lobby/name {name}`, `POST /lobby/deck {name}` or `{dck}`. `name` renames the seated player, so a seat taken by auto-join under a placeholder name can be named later.

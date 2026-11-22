@@ -49,7 +49,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private final AtomicLong revision = new AtomicLong();
     private final Object changeLock = new Object();
 
-    private final AgentGuiGame gui = new AgentGuiGame(this::changed);
+    private final AgentGuiGame gui = new AgentGuiGame(this::changed, this::reconnectStateChanged);
     private final ClientGameLobby lobby = new ClientGameLobby();
     private volatile FGameClient client;
     private volatile String host;
@@ -284,9 +284,30 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
 
     @Override
     public void close() {
-        connected = false;
-        closeReason = "connection closed by host or network";
         gui.leaveGame();
+        lost("connection closed by host or network");
+    }
+
+    /** Forge's client tells its lobby listeners nothing when it stops trying to reconnect. */
+    private void reconnectStateChanged(final FGameClient.ReconnectState state) {
+        if (state == FGameClient.ReconnectState.FAILED) {
+            lost("the host could not be reached again");
+        } else if (state == FGameClient.ReconnectState.SEAT_LOST) {
+            lost("the host no longer holds this seat");
+        }
+    }
+
+    /** The connection has ended and Forge's client is not retrying. The lobby it showed goes with it. */
+    private void lost(final String reason) {
+        if (!connected) {
+            return;
+        }
+        connected = false;
+        closeReason = reason;
+        lobbyData = null;
+        mySlot = -1;
+        lobbyDeck = null;
+        changed();
     }
 
     @Override

@@ -48,7 +48,7 @@ final class RiggedMatch {
     int hostPort;
     final BridgeHttp http;
     private final FServerManager server = FServerManager.getInstance();
-    private final AgentBridge bridge = new AgentBridge();
+    final AgentBridge bridge = new AgentBridge();
     private final Set<String> tried = new HashSet<>();
     private long lastCardSelect;
     private long seen = -1;

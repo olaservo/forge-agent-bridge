@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import com.google.common.collect.Lists;
 
@@ -36,6 +37,7 @@ import forge.util.ITriggerEvent;
 final class AgentGuiGame extends NetworkGuiGame {
 
     private final Runnable onChange;
+    private final Consumer<FGameClient.ReconnectState> onReconnectState;
     private final AtomicInteger decisionIds = new AtomicInteger();
 
     /**
@@ -62,8 +64,9 @@ final class AgentGuiGame extends NetworkGuiGame {
     private volatile boolean left;
     final List<String> messages = new CopyOnWriteArrayList<>();
 
-    AgentGuiGame(final Runnable onChange) {
+    AgentGuiGame(final Runnable onChange, final Consumer<FGameClient.ReconnectState> onReconnectState) {
         this.onChange = onChange;
+        this.onReconnectState = onReconnectState;
     }
 
     private void changed() {
@@ -512,6 +515,7 @@ final class AgentGuiGame extends NetworkGuiGame {
         } else {
             changed();
         }
+        onReconnectState.accept(state);
     }
 
     @Override
