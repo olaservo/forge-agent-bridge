@@ -22,7 +22,7 @@ import forge.model.FModel;
  * joins: agent seats through the bridge, people through a Forge client. It starts a match when every
  * slot is taken and each seat is ready with a legal deck, and waits for the next one when the match
  * ends. Run it like {@link AgentMain}, from the folder that holds Forge's {@code res}:
- * {@code java -cp <this jar><path separator><forge jar> forge.agent.MatchHost [--port N] [--seats N] [--limited]}.
+ * {@code java -cp <this jar><path separator><forge jar> forge.agent.MatchHost [--port N] [--seats N] [--limited] [--exit-with-parent]}.
  */
 public final class MatchHost {
 
@@ -54,6 +54,8 @@ public final class MatchHost {
                 port = Integer.parseInt(args[++i]);
             } else if ("--seats".equals(args[i]) && i + 1 < args.length) {
                 seats = Integer.parseInt(args[++i]);
+            } else if (ParentWatch.FLAG.equals(args[i])) {
+                ParentWatch.exitWithParent("[match-host]");
             }
         }
         if (seats < 2) {

@@ -12,7 +12,7 @@ import forge.model.FModel;
  * A headless Forge network client behind a local HTTP JSON API, for forge-mcp-server. Runs until killed.
  * Start it with Forge's own jar on the classpath, from the folder that holds Forge's {@code res}:
  * {@code java -cp <this jar><path separator><forge jar> forge.agent.AgentMain [--port N] [--auto-pass off|opponent-turns|always]
- * [--auto-join host:port] [--auto-join-name NAME] [--auto-join-deck DECK]}.
+ * [--auto-join host:port] [--auto-join-name NAME] [--auto-join-deck DECK] [--exit-with-parent]}.
  */
 public final class AgentMain {
 
@@ -38,6 +38,8 @@ public final class AgentMain {
                 autoJoinName = args[++i];
             } else if ("--auto-join-deck".equals(args[i]) && i + 1 < args.length) {
                 autoJoinDeck = args[++i];
+            } else if (ParentWatch.FLAG.equals(args[i])) {
+                ParentWatch.exitWithParent("[agent]");
             }
         }
 

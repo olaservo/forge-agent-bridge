@@ -40,6 +40,8 @@ java -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Dio.netty.tryReflectionSetA
 
 It prints `AGENT_BRIDGE_READY port=36744` once the card database has loaded, about 30 to 40 seconds.
 
+With `--exit-with-parent` the bridge exits when the process that started it ends, including when that process is killed. A program that spawns the bridge passes it so the bridge does not stay behind on its port. It watches its direct parent. When a shell starts `java`, that is the shell. With no parent left when it starts, it exits at once.
+
 ## Auto-pass
 
 Forge has a per-player setting that passes priority for a player who has no available actions. The bridge sends it to the host for its seat, in one of three modes:
@@ -74,7 +76,7 @@ Off by default. With `--auto-join <host>:<port>` the bridge checks the host's po
 java -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Dio.netty.tryReflectionSetAccessible=true -Xmx2048m -cp "<bridge jar>;<forge jar>" forge.agent.MatchHost --port 36743 --seats 2
 ```
 
-It prints `MATCH_HOST_READY port=36743` once the card database has loaded. `--seats` is the number of players, 2 by default. `--limited` puts the lobby in Limited mode, for 40-card decks.
+It prints `MATCH_HOST_READY port=36743` once the card database has loaded. `--seats` is the number of players, 2 by default. `--limited` puts the lobby in Limited mode, for 40-card decks. `--exit-with-parent` works as it does for the bridge.
 
 - It listens on every network interface, as a Forge host does, and has no password. Anyone who can reach the port can take a seat.
 - The first player to join takes slot 0, which a desktop host keeps for itself, and Forge marks that player's chat lines "(Host)".
