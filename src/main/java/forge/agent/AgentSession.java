@@ -6,6 +6,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 
@@ -24,6 +27,7 @@ import forge.gamemodes.net.ChatMessage;
 import forge.gamemodes.net.client.ClientGameLobby;
 import forge.gamemodes.net.client.FGameClient;
 import forge.gamemodes.net.event.DraftPickEvent;
+import forge.gamemodes.net.event.HeartbeatEvent;
 import forge.gamemodes.net.event.MessageEvent;
 import forge.gamemodes.net.event.UpdateLobbyPlayerEvent;
 import forge.gui.interfaces.IDraftEventHandler;
@@ -53,6 +57,13 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private volatile String name;
     private volatile boolean connected;
     private volatile String closeReason;
+    /**
+     * Forge's client sends a heartbeat only after 15 s without writing, and closes the connection after 45 s
+     * without reading. The host answers each heartbeat. A seat that writes more often than that to a quiet
+     * host gets nothing to read, so the bridge sends heartbeats on a timer of its own.
+     */
+    private static final long HEARTBEAT_MILLIS = 10_000;
+    private ScheduledExecutorService heartbeat;
 
     private volatile GameLobbyData lobbyData;
     private volatile int mySlot = -1;
@@ -160,13 +171,33 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         c.connect();
         client = c;
         connected = true;
+        heartbeat = Executors.newSingleThreadScheduledExecutor(r -> {
+            final Thread t = new Thread(r, "Agent-Heartbeat");
+            t.setDaemon(true);
+            return t;
+        });
+        heartbeat.scheduleWithFixedDelay(() -> sendHeartbeat(c), HEARTBEAT_MILLIS, HEARTBEAT_MILLIS, TimeUnit.MILLISECONDS);
         changed();
+    }
+
+    private void sendHeartbeat(final FGameClient c) {
+        try {
+            if (connected && c.getReconnectState() == FGameClient.ReconnectState.CONNECTED) {
+                c.send(new HeartbeatEvent());
+            }
+        } catch (final RuntimeException e) {
+            System.err.println("[agent] could not send a heartbeat: " + e);
+        }
     }
 
     synchronized void disconnect() {
         final FGameClient c = client;
         client = null;
         connected = false;
+        if (heartbeat != null) {
+            heartbeat.shutdownNow();
+            heartbeat = null;
+        }
         if (c != null) {
             c.close();
         }
