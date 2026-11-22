@@ -219,7 +219,15 @@ public class AgentDraftTest {
         assertEquals(ready.getAsJsonObject("myDeck").get("mainSize").getAsInt(), 40);
         waitFor("host sees the deck and ready flag", 10_000, () -> lobby.getSlot(1).isReady() && lobby.getSlot(1).getDeck() != null);
         assertEquals(lobby.getSlot(1).getDeck().getMain().countAll(), 40);
-        assertEquals(lobby.getSlot(1).getDeck().getMain().countAll(pc -> pc.getName().equals("Plains")), 17, "the basic lands reached the host");
+        // A pack holds a basic land, so the 23 pool cards can include Plains of their own.
+        int draftedPlains = 0;
+        for (final JsonElement c : main) {
+            if ("Plains".equals(c.getAsString())) {
+                draftedPlains++;
+            }
+        }
+        assertEquals(lobby.getSlot(1).getDeck().getMain().countAll(pc -> pc.getName().equals("Plains")), 17 + draftedPlains,
+                "the basic lands reached the host");
         http.post("/chat", BridgeHttp.body("text", "thanks for the draft"));
         http.post("/disconnect", new JsonObject());
         assertFalse(http.get("/status").getAsJsonObject("connection").get("connected").getAsBoolean());
