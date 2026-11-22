@@ -202,10 +202,13 @@ final class Snapshots {
         m.put("inGame", gv != null && !gui.gameFinished);
         m.put("finished", gui.gameFinished);
         final AgentGuiGame.Prompt prompt = gui.prompt;
-        m.put("prompt", prompt.message());
+        final PendingDecision d = gui.pending;
+        final boolean deciding = d != null && !d.isAnswered();
+        // A decision is what the seat is asked while it is pending. The host's prompt under it can read "Waiting for ...".
+        m.put("prompt", deciding ? d.prompt : prompt.message());
         m.put("promptCount", prompt.count());
-        m.put("waiting", prompt.waiting());
-        m.put("priorityPrompt", prompt.message().startsWith(priorityPrefix));
+        m.put("waiting", !deciding && prompt.waiting());
+        m.put("priorityPrompt", !deciding && prompt.message().startsWith(priorityPrefix));
         m.put("promptCard", prompt.card() == null ? null : prompt.card().getName());
         final Map<String, Object> buttons = new LinkedHashMap<>();
         buttons.put("ok", prompt.okLabel());
@@ -214,8 +217,7 @@ final class Snapshots {
         buttons.put("cancelEnabled", prompt.cancelEnabled());
         m.put("buttons", buttons);
         m.put("incorrectActions", gui.incorrectActions);
-        final PendingDecision d = gui.pending;
-        if (d != null && !d.isAnswered()) {
+        if (deciding) {
             final Map<String, Object> dm = new LinkedHashMap<>();
             dm.put("id", d.id);
             dm.put("kind", d.kind);

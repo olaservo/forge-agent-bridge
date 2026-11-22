@@ -2,6 +2,7 @@ package forge.agent;
 
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertNotEquals;
 import static org.testng.Assert.assertTrue;
 
 import java.util.ArrayList;
@@ -53,6 +54,7 @@ public class AgentScryTest {
     public void agentChoosesWhatAScryKeepsOnTop() throws Exception {
         match = new RiggedMatch(DECK, RiggedMatch.deck("Host lands", "40 Forest"));
         final List<Integer> looked = new ArrayList<>();
+        String asked = null;
         final long deadline = System.currentTimeMillis() + 240_000;
         while (looked.isEmpty()) {
             final JsonObject g = match.next();
@@ -64,6 +66,11 @@ public class AgentScryTest {
                 continue;
             }
             match.http.record("GET /game#order", g);
+            // The summary asks what the decision asks. The host's own prompt here is "Waiting for ...".
+            assertEquals(g.get("prompt").getAsString(), d.get("prompt").getAsString(), "the prompt is the decision's: " + g);
+            assertFalse(g.get("waiting").getAsBoolean(), "the seat is not waiting while it has a decision: " + g);
+            assertFalse(g.get("priorityPrompt").getAsBoolean(), "a decision is not a priority prompt: " + g);
+            asked = d.get("prompt").getAsString();
             final JsonArray options = d.getAsJsonArray("options");
             assertEquals(options.size(), 2, "scry 2 shows two cards: " + d);
             assertEquals(d.get("min").getAsInt(), 0, "any number may go to the bottom: " + d);
@@ -84,7 +91,9 @@ public class AgentScryTest {
         AgentGameTest.waitFor("the kept card is drawn", 20_000, () -> match.hostIds(RiggedMatch.ME, ZoneType.Hand).contains(kept));
         final List<Integer> library = match.hostIds(RiggedMatch.ME, ZoneType.Library);
         assertEquals(library.get(library.size() - 1).intValue(), toBottom, "the other card is on the bottom of the library");
-        assertFalse(match.http.get("/game").has("pendingDecision"), "the scry is over");
+        final JsonObject after = match.http.get("/game");
+        assertFalse(after.has("pendingDecision"), "the scry is over");
+        assertNotEquals(after.get("prompt").getAsString(), asked, "the host's prompt is back: " + after);
         match.finish();
     }
 }
