@@ -66,6 +66,22 @@ Off by default. With `--auto-join <host>:<port>` the bridge checks the host's po
 - A seat taken through `POST /connect` or `POST /sit` is left alone.
 - Each check while a lobby is up and the bridge is not seated opens and closes a connection, which the host logs as an unregistered peer.
 
+## Hosting without a Forge client
+
+`MatchHost` is a Forge host with no window and no seat of its own, in the same jar. Every slot is open, so the players are whoever joins: bridge seats, and people in a Forge desktop or mobile client who connect to this machine's address and the port. It starts a match once every slot is taken and each seat is ready with a deck, and when the players have left the match it waits for them to ready up again.
+
+```
+java -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Dio.netty.tryReflectionSetAccessible=true -Xmx2048m -cp "<bridge jar>;<forge jar>" forge.agent.MatchHost --port 36743 --seats 2
+```
+
+It prints `MATCH_HOST_READY port=36743` once the card database has loaded. `--seats` is the number of players, 2 by default. `--limited` puts the lobby in Limited mode, for 40-card decks.
+
+- It listens on every network interface, as a Forge host does, and has no password. Anyone who can reach the port can take a seat.
+- The first player to join takes slot 0, which a desktop host keeps for itself, and Forge marks that player's chat lines "(Host)".
+- A deck that breaks the lobby's deck rules is refused with a chat line that names the seat and the problem, and the match waits for another deck. Forge's "enforce deck legality" preference turns this off, as it does for a desktop host.
+- It hosts plain Constructed or Limited matches. Variants, a format restriction and draft events are not set up; `DraftHost` in the test sources hosts a draft.
+- Run against bridge seats only. A Forge client as a player, and a player who disconnects during a game, have not been run.
+
 ## HTTP API
 
 All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
