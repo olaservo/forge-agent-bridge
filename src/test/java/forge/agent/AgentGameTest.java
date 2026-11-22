@@ -174,9 +174,9 @@ public class AgentGameTest {
                     }
                 }
                 http.post("/game/decide", BridgeHttp.body("id", d.get("id").getAsInt(), "choices", choices, "text", text));
-            } else if (!iHavePriority(g) && g.get("waiting").getAsBoolean()) {
-                // The other player is acting; nothing to do. Both signals are needed: the prompt text lags
-                // behind the priority flag, and before the first turn (mulligans) nobody has priority.
+            } else if (g.get("waiting").getAsBoolean()) {
+                assertFalse(iHavePriority(g), "no priority while waiting: " + g);
+                // The other player is acting; nothing to do.
             } else if ("Auto".equals(okLabel)) {
                 // Auto can be enabled for a cost the lands cannot pay (a kicked spell); pressing it again changes
                 // nothing, so the second time on the same prompt, cancel.
@@ -217,6 +217,9 @@ public class AgentGameTest {
         final JsonObject full = http.get("/game");
         assertFalse(full.get("winner").getAsString().isEmpty(), "winner reported: " + full);
         assertTrue(full.get("turn").getAsInt() > 1, "more than one turn: " + full);
+        assertTrue(full.get("prompt").getAsString().startsWith("Game over. Winner: "), "the prompt says the game is over: " + full);
+        assertFalse(full.get("waiting").getAsBoolean(), "not waiting after game over: " + full);
+        assertFalse(full.get("hasPriority").getAsBoolean(), "no priority after game over: " + full);
         assertTrue(actions > 10, "agent passed priority through the game: " + actions);
         assertTrue(decisions > 0, "at least one decision dialog was answered (kicker or library search)");
         final JsonObject log = http.get("/game/log", Map.of("since", "0"));

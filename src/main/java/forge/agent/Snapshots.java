@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import forge.deck.Deck;
@@ -204,11 +205,14 @@ final class Snapshots {
         final AgentGuiGame.Prompt prompt = gui.prompt;
         final PendingDecision d = gui.pending;
         final boolean deciding = d != null && !d.isAnswered();
+        // The host sends no prompt when the game ends, so the last one would stay.
+        final boolean over = gv != null && gv.isGameOver();
+        final boolean waiting = !over && !deciding && prompt.waiting();
         // A decision is what the seat is asked while it is pending. The host's prompt under it can read "Waiting for ...".
-        m.put("prompt", deciding ? d.prompt : prompt.message());
+        m.put("prompt", over ? "Game over. Winner: " + Objects.toString(gv.getWinningPlayerName(), "") : deciding ? d.prompt : prompt.message());
         m.put("promptCount", prompt.count());
-        m.put("waiting", !deciding && prompt.waiting());
-        m.put("priorityPrompt", !deciding && prompt.message().startsWith(priorityPrefix));
+        m.put("waiting", waiting);
+        m.put("priorityPrompt", !over && !deciding && prompt.message().startsWith(priorityPrefix));
         m.put("promptCard", prompt.card() == null ? null : prompt.card().getName());
         final Map<String, Object> buttons = new LinkedHashMap<>();
         buttons.put("ok", prompt.okLabel());
@@ -243,7 +247,8 @@ final class Snapshots {
         final PlayerView me = gui.getCurrentPlayer();
         m.put("me", me == null ? null : me.getName());
         // The host sends no new prompt when it passes for us, so a "Priority: ..." prompt can outlive our priority.
-        m.put("hasPriority", me == null ? null : me.getHasPriority());
+        // The player view can still say we hold priority after we passed, until the host updates it.
+        m.put("hasPriority", me == null ? null : !over && !waiting && me.getHasPriority());
         m.put("autoPass", autoPass.mode());
         m.put("autoPassNow", autoPass.now());
         if (!full) {
@@ -258,8 +263,9 @@ final class Snapshots {
             pm.put("id", p.getId());
             pm.put("name", p.getName());
             pm.put("life", p.getLife());
-            pm.put("hasPriority", p.getHasPriority());
-            pm.put("isMe", me != null && me.getId() == p.getId());
+            final boolean isMe = me != null && me.getId() == p.getId();
+            pm.put("hasPriority", isMe ? m.get("hasPriority") : !over && p.getHasPriority());
+            pm.put("isMe", isMe);
             pm.put("handSize", p.getZoneSize(ZoneType.Hand));
             pm.put("librarySize", p.getZoneSize(ZoneType.Library));
             pm.put("graveyardSize", p.getZoneSize(ZoneType.Graveyard));
