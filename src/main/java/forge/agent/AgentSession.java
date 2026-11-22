@@ -10,6 +10,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 
 import forge.deck.Deck;
+import forge.deck.DeckFormat;
+import forge.deck.DeckSection;
 import forge.game.GameLogEntry;
 import forge.game.GameView;
 import forge.game.card.CardView;
@@ -65,6 +67,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     /** Replaced under {@code draftLock}: draft events arrive on the network thread and a pick on an HTTP thread. */
     private volatile DraftState draft = DraftState.NONE;
     private final Object draftLock = new Object();
+    /** The deck last sent to the host for our slot. The host does not send a seat's deck back. */
+    private volatile Deck lobbyDeck;
     final List<String> picks = new CopyOnWriteArrayList<>();
     final List<String> autoPicks = new CopyOnWriteArrayList<>();
 
@@ -168,6 +172,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
         lobbyData = null;
         mySlot = -1;
+        lobbyDeck = null;
         changed();
     }
 
@@ -275,6 +280,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
 
     void setDeck(final Deck deck) {
         requireClient().send(UpdateLobbyPlayerEvent.deckUpdate(deck));
+        lobbyDeck = deck;
+        changed();
     }
 
     void sendChat(final String text) {
@@ -286,7 +293,11 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     @Override
     public void draftPackArrived(final int seat, final List<PaperCard> pack, final int packNo, final int pickNo, final int timer) {
         synchronized (draftLock) {
-            draft = draft.packArrived(seat, pack, packNo, pickNo, timer);
+            if (draft.pool() != null) {
+                startEvent();
+            }
+            // The host counts picks from 0 here and from 1 in its auto-pick notice. The bridge counts from 1.
+            draft = draft.packArrived(seat, pack, packNo, pickNo + 1, timer);
         }
         changed();
     }
@@ -319,9 +330,89 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             path = "not saved: " + e;
         }
         synchronized (draftLock) {
+            if (draft.pool() != null) {
+                // A second pool with no pack in between is a sealed event after an earlier event.
+                startEvent();
+            }
             draft = draft.poolReceived(deck, eventId, path);
         }
+        // The deck in the slot, if any, was for an earlier match.
+        lobbyDeck = null;
         changed();
+    }
+
+    /** Forgets the picks of the event before this one. */
+    private void startEvent() {
+        picks.clear();
+        autoPicks.clear();
+    }
+
+    /**
+     * Builds the deck for the match from the delivered pool, sends it to the host and saves it over the pool file,
+     * as the desktop's deck editor does. {@code main} names pool cards, one entry per copy. {@code lands} adds
+     * basic lands, which a Limited deck may take in any number. Cards left in the pool become the sideboard.
+     */
+    synchronized Map<String, Object> buildDeck(final List<String> main, final Map<String, Integer> lands, final String landSet) {
+        final Deck pool = draft.pool();
+        if (pool == null) {
+            throw new IllegalStateException("no pool yet: the draft has not finished");
+        }
+        final List<PaperCard> left = new ArrayList<>(pool.getAllCardsInASinglePool().toFlatList());
+        final Deck deck = new Deck(pool.getName());
+        deck.getTags().addAll(pool.getTags());
+        final List<String> missing = new ArrayList<>();
+        for (final String wanted : main) {
+            PaperCard found = null;
+            for (final PaperCard pc : left) {
+                if (pc.getName().equalsIgnoreCase(wanted.trim())) {
+                    found = pc;
+                    break;
+                }
+            }
+            if (found == null) {
+                missing.add(wanted);
+            } else {
+                left.remove(found);
+                deck.getMain().add(found);
+            }
+        }
+        if (!missing.isEmpty()) {
+            throw new IllegalArgumentException("not in the pool, or more copies than the pool has: " + String.join(", ", missing));
+        }
+        final String set = landSet != null ? landSet : Snapshots.commonSet(pool);
+        int landCount = 0;
+        for (final Map.Entry<String, Integer> e : lands.entrySet()) {
+            PaperCard land = set == null ? null : FModel.getMagicDb().getCommonCards().getCard(e.getKey(), set);
+            if (land == null) {
+                land = FModel.getMagicDb().getCommonCards().getCard(e.getKey());
+            }
+            if (land == null || !land.getRules().getType().isBasicLand()) {
+                throw new IllegalArgumentException("'" + e.getKey() + "' is not a basic land");
+            }
+            if (e.getValue() > 0) {
+                deck.getMain().add(land, e.getValue());
+                landCount += e.getValue();
+            }
+        }
+        if (!left.isEmpty()) {
+            deck.getOrCreate(DeckSection.Sideboard).addAllFlat(left);
+        }
+        setDeck(deck);
+        String path;
+        try {
+            FModel.getDecks().getNetworkEventDecks().add(deck);
+            path = new File(ForgeConstants.DECK_NET_EVENT_DIR, deck.getName() + ".dck").getAbsolutePath();
+        } catch (final RuntimeException e) {
+            path = "not saved: " + e;
+        }
+        final Map<String, Object> out = new LinkedHashMap<>();
+        out.put("deck", deck.getName());
+        out.put("size", deck.getMain().countAll());
+        out.put("lands", landCount);
+        out.put("sideboardSize", left.size());
+        out.put("path", path);
+        out.put("problem", DeckFormat.Limited.getDeckConformanceProblem(deck));
+        return out;
     }
 
     /** Picks a card from the current pack by exact name or 0-based index string. */
@@ -626,7 +717,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     }
 
     Map<String, Object> lobbySnapshot() {
-        return Snapshots.lobby(lobbyData, lobby, mySlot);
+        return Snapshots.lobby(lobbyData, lobby, mySlot, lobbyDeck);
     }
 
     Map<String, Object> draftSnapshot(final boolean withCards) {

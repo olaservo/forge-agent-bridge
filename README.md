@@ -75,7 +75,8 @@ All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 - `POST /sit {host, port, name, deck}`, `{..., deckFile}` or `{..., dck}`: connect, wait for the slot and, with a deck, send it and ready. `deck` is a name, `deckFile` a path to a `.dck` file, `dck` the file's text. Answers like `/status`, with the slot assigned. An unknown deck fails before a seat is taken.
 - `POST /lobby/ready {ready}`, `POST /lobby/avatar {index}`, `POST /lobby/name {name}`, `POST /lobby/deck {name}` or `{dck}`. `name` renames the seated player, so a seat taken by auto-join under a placeholder name can be named later.
 - `POST /chat {text}`. `chat` in the status holds the last 20 lines as `{from, text}`, with `from` null for a line from the host itself, and `chatCount` counts them all.
-- `GET /draft/pack`, `POST /draft/pick {card}`, `GET /draft/pool`
+- `GET /draft/pack`, `POST /draft/pick {card}`, `GET /draft/pool`. `packNumber` and `pickNumber` count from 1. `secondsLeft` is sent while a pick is waiting and the host set a pick clock. The pool of a sealed event arrives the same way, with no packs before it.
+- `POST /draft/deck {main, lands, landSet}`: builds the deck for the match from the pool, sends it to the host and saves it over the pool file, as the desktop's deck editor does. `main` lists pool card names, one entry per copy. `lands` maps basic land names to counts. `landSet` is the set code for the lands and defaults to the set most of the pool comes from. Cards left in the pool become the sideboard. `problem` is null when the deck is legal for Limited. `lobby.myDeck` in the status then shows the deck's name and sizes, because the host does not send a seat's deck back.
 - `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}` or `{id, amounts}`, `POST /game/yield {autoPass}`
 
 What the seat is asked comes in four forms in the game state:
@@ -97,6 +98,12 @@ mvn -B test -DskipTests=false -Dforge.jar=<forge jar> -Dforge.home=<folder that 
 ```
 
 They also record the bridge's responses under `target/agent-fixtures`, which forge-mcp-server uses as test fixtures.
+
+`DraftHost` in the test sources is a host with no window, for drafting against agent seats without the desktop client. It hosts a booster draft from one set, starts it when the expected seats are ready, fills the pod with Forge's AI drafters, and then starts the match with the deck its own AI seat drafted. It takes `--port`, `--block`, `--set`, `--pod`, `--timer`, `--seats` and `--no-match`. Run it from the folder that holds `res`, after `mvn test-compile`:
+
+```
+java -cp "target/test-classes;target/classes;<forge jar>" forge.agent.DraftHost --port 36743 --block "Magic 2011" --set M11 --pod 4 --timer 60
+```
 
 `AgentSoakTest` is off unless asked for. It plays games with random decks on both seats and compares the bridge's game state with the host's own at every prompt. It fails if they disagree, if the host waits on the seat while the bridge shows nothing to answer, or if a card offered in `selection` is refused. It writes `target/agent-soak/report.json`, which also lists the host inputs and decision kinds the games reached. A game takes two to four minutes.
 

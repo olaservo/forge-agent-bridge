@@ -36,7 +36,7 @@ final class Snapshots {
     private Snapshots() {
     }
 
-    static Map<String, Object> lobby(final GameLobbyData d, final ClientGameLobby lobby, final int mySlot) {
+    static Map<String, Object> lobby(final GameLobbyData d, final ClientGameLobby lobby, final int mySlot, final Deck myDeck) {
         final Map<String, Object> m = new LinkedHashMap<>();
         m.put("mySlot", mySlot);
         if (d == null) {
@@ -60,6 +60,13 @@ final class Snapshots {
             slots.add(sm);
         }
         m.put("slots", slots);
+        if (myDeck != null) {
+            final Map<String, Object> dm = new LinkedHashMap<>();
+            dm.put("name", myDeck.getName());
+            dm.put("mainSize", myDeck.getMain().countAll());
+            dm.put("sideboardSize", myDeck.has(DeckSection.Sideboard) ? myDeck.get(DeckSection.Sideboard).countAll() : 0);
+            m.put("myDeck", dm);
+        }
         final NetworkEventView ev = d.getEventView();
         if (ev != null) {
             final Map<String, Object> em = new LinkedHashMap<>();
@@ -91,6 +98,10 @@ final class Snapshots {
         m.put("packNumber", d.packNumber());
         m.put("pickNumber", d.pickNumber());
         m.put("timerSeconds", d.timerSeconds());
+        final int secondsLeft = d.secondsLeft();
+        if (secondsLeft >= 0) {
+            m.put("secondsLeft", secondsLeft);
+        }
         m.put("pickPending", d.pickPending());
         final List<PaperCard> pack = d.pack();
         m.put("packSize", pack == null ? 0 : pack.size());
@@ -125,6 +136,7 @@ final class Snapshots {
         m.put("name", d.getName());
         m.put("path", draft.poolPath());
         m.put("tags", new ArrayList<>(d.getTags()));
+        m.put("landSet", commonSet(d));
         // Forge delivers a drafted pool with every pick in the Sideboard section and an empty Main.
         m.put("size", d.getAllCardsInASinglePool().countAll());
         m.put("mainSize", d.getMain().countAll());
@@ -142,6 +154,21 @@ final class Snapshots {
         }
         m.put("cards", cards);
         return m;
+    }
+
+    /** The set most of the pool's cards come from, for naming basic lands. Null for an empty pool. */
+    static String commonSet(final Deck pool) {
+        final Map<String, Integer> counts = new LinkedHashMap<>();
+        for (final PaperCard pc : pool.getAllCardsInASinglePool().toFlatList()) {
+            counts.merge(pc.getEdition(), 1, Integer::sum);
+        }
+        String best = null;
+        for (final Map.Entry<String, Integer> e : counts.entrySet()) {
+            if (best == null || e.getValue() > counts.get(best)) {
+                best = e.getKey();
+            }
+        }
+        return best;
     }
 
     static Map<String, Object> describe(final PaperCard pc) {

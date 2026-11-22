@@ -164,6 +164,21 @@ public final class AgentBridge {
                 return session.pick(str(body, "card", null));
             case "GET /draft/pool":
                 return session.poolSnapshot();
+            case "POST /draft/deck": {
+                final List<String> main = new ArrayList<>();
+                if (body.has("main") && body.get("main").isJsonArray()) {
+                    for (final JsonElement e : body.getAsJsonArray("main")) {
+                        main.add(e.getAsString());
+                    }
+                }
+                final Map<String, Integer> lands = new LinkedHashMap<>();
+                if (body.has("lands") && body.get("lands").isJsonObject()) {
+                    for (final Map.Entry<String, JsonElement> e : body.getAsJsonObject("lands").entrySet()) {
+                        lands.put(e.getKey(), e.getValue().getAsInt());
+                    }
+                }
+                return session.buildDeck(main, lands, optStr(body, "landSet"));
+            }
             case "GET /game":
                 return session.gameSnapshot(true);
             case "GET /game/log":

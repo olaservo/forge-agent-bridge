@@ -5,7 +5,6 @@ import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertTrue;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -41,11 +40,13 @@ import forge.model.FModel;
 /**
  * Hosts a two-seat network booster draft in-process and lets the bridge take the second seat,
  * driven over its HTTP API like the MCP server does: pick through the draft until the pool
- * arrives, then build a 40-card deck from it as .dck text and submit it for the Limited lobby.
+ * arrives, then build a 40-card deck from it and submit it for the Limited lobby.
  */
 public class AgentDraftTest {
 
     private static final int HOST_PORT = 36799;
+    /** Long enough that no pick in the test runs out. */
+    private static final int PICK_TIMER_SECONDS = 120;
     private FServerManager server;
     private ServerGameLobby lobby;
     private AgentBridge bridge;
@@ -141,7 +142,7 @@ public class AgentDraftTest {
 
         lobby.setLimitedMode(true);
         lobby.createEvent(EventFormat.BOOSTER_DRAFT);
-        assertTrue(lobby.configureEvent(LimitedPoolType.Block, draft, 0, 0));
+        assertTrue(lobby.configureEvent(LimitedPoolType.Block, draft, PICK_TIMER_SECONDS, 0));
         final ServerGameLobby.DraftStartResult start = lobby.startDraftEvent();
         assertNotNull(start);
         assertEquals(start.names().length, 2);
@@ -159,6 +160,10 @@ public class AgentDraftTest {
             if (d.get("pickPending").getAsBoolean()) {
                 final JsonObject pack = http.get("/draft/pack");
                 assertTrue(pack.getAsJsonArray("pack").size() > 0, "pack has cards: " + pack);
+                // Picks count from 1 in each pack, and a pack of 15 has one card fewer at each pick.
+                assertEquals(pack.get("pickNumber").getAsInt(), 16 - pack.get("packSize").getAsInt(), "pick number: " + pack);
+                final int left = pack.get("secondsLeft").getAsInt();
+                assertTrue(left > 0 && left <= PICK_TIMER_SECONDS, "seconds left on the pick clock: " + pack);
                 // The first pick goes by exact name, the rest by index, so both lookups are exercised.
                 final String card = picks == 0 ? pack.getAsJsonArray("pack").get(0).getAsJsonObject().get("name").getAsString() : "0";
                 final JsonObject picked = http.post("/draft/pick", BridgeHttp.body("card", card));
@@ -184,27 +189,37 @@ public class AgentDraftTest {
         final JsonObject bad = http.postExpectingError("/draft/pick", BridgeHttp.body("card", "0"));
         assertTrue(bad.get("error").getAsString().contains("no pack"), "picking after the draft is an error: " + bad);
 
-        // Deck from the pool as the drafter skill describes: no arguments takes the raw pool (45 cards in Sideboard) ...
+        assertEquals(pool.get("landSet").getAsString(), "M11");
+        assertFalse(http.get("/status").getAsJsonObject("draft").has("secondsLeft"), "no clock once the draft is over");
+        assertFalse(http.get("/status").getAsJsonObject("lobby").has("myDeck"), "no deck in the slot yet");
+
+        // No arguments takes the raw pool (45 cards in Sideboard), which is not a deck ...
         final JsonObject rawDeck = http.post("/lobby/deck", new JsonObject());
         assertEquals(rawDeck.get("size").getAsInt(), 0, "the raw pool has nothing in Main");
-        // ... and .dck text builds the real 40-card deck: 23 pool cards plus 17 basic lands.
-        final List<String> lines = new ArrayList<>(List.of("[metadata]", "Name=Agent Draft Deck", "[Main]"));
-        int taken = 0;
+        // ... and /draft/deck builds the real one: 23 pool cards plus 17 basic lands, the rest as sideboard.
+        final JsonArray main = new JsonArray();
         for (final JsonElement c : pool.getAsJsonArray("cards")) {
-            if (taken == 23) {
+            if (main.size() == 23) {
                 break;
             }
-            final JsonObject card = c.getAsJsonObject();
-            lines.add("1 " + card.get("name").getAsString() + "|" + card.get("set").getAsString());
-            taken++;
+            main.add(c.getAsJsonObject().get("name").getAsString());
         }
-        lines.add("17 Plains|M11");
-        final JsonObject deck = http.post("/lobby/deck", BridgeHttp.body("dck", String.join("\n", lines)));
-        assertEquals(deck.get("size").getAsInt(), 40, "40-card deck from .dck text: " + deck);
+        final JsonObject lands = new JsonObject();
+        lands.addProperty("Plains", 17);
+        final JsonArray notMine = main.deepCopy();
+        notMine.add("Black Lotus");
+        final JsonObject refused = http.postExpectingError("/draft/deck", BridgeHttp.body("main", notMine, "lands", lands));
+        assertTrue(refused.get("error").getAsString().contains("Black Lotus"), "a card outside the pool is refused: " + refused);
+        final JsonObject deck = http.post("/draft/deck", BridgeHttp.body("main", main, "lands", lands));
+        assertEquals(deck.get("size").getAsInt(), 40, "40-card deck from the pool: " + deck);
+        assertEquals(deck.get("sideboardSize").getAsInt(), 22);
+        assertTrue(deck.get("problem").isJsonNull(), "the deck is legal for Limited: " + deck);
         final JsonObject ready = http.post("/lobby/ready", BridgeHttp.body("ready", true));
         assertEquals(ready.get("mySlot").getAsInt(), 1);
+        assertEquals(ready.getAsJsonObject("myDeck").get("mainSize").getAsInt(), 40);
         waitFor("host sees the deck and ready flag", 10_000, () -> lobby.getSlot(1).isReady() && lobby.getSlot(1).getDeck() != null);
         assertEquals(lobby.getSlot(1).getDeck().getMain().countAll(), 40);
+        assertEquals(lobby.getSlot(1).getDeck().getMain().countAll(pc -> pc.getName().equals("Plains")), 17, "the basic lands reached the host");
         http.post("/chat", BridgeHttp.body("text", "thanks for the draft"));
         http.post("/disconnect", new JsonObject());
         assertFalse(http.get("/status").getAsJsonObject("connection").get("connected").getAsBoolean());
