@@ -10,6 +10,7 @@ import java.util.Set;
 
 import forge.deck.Deck;
 import forge.deck.DeckSection;
+import forge.game.GameEntityView;
 import forge.game.GameView;
 import forge.game.card.CardView;
 import forge.game.card.CardView.CardStateView;
@@ -402,6 +403,12 @@ final class Snapshots {
         if (cv.isPhasedOut()) {
             // Still listed in its zone, but treated as though it does not exist until it phases in.
             m.put("phasedOut", true);
+        }
+        // An Aura, Equipment or Fortification names what it is attached to, a card or a player.
+        final GameEntityView host = cv.getEntityAttachedTo();
+        final List<Map<String, Object>> attachedTo = host == null ? List.of() : entities(List.<TrackableObject>of(host), false);
+        if (!attachedTo.isEmpty()) {
+            m.put("attachedTo", attachedTo.get(0));
         }
         final CardStateView st = cv.getCurrentState();
         if (st != null) {
