@@ -167,6 +167,9 @@ public class AgentHostedMatchTest {
         for (final BridgeHttp seat : List.of(first, second)) {
             AgentGameTest.waitFor("the game ends on the concession", 30_000, () -> seat.get("/game").get("gameOver").getAsBoolean());
         }
+        // Seats that read the result before leaving take longer than the host's start delay
+        Thread.sleep(5_000);
+        assertTrue(first.get("/game").get("gameOver").getAsBoolean(), "the host starts no match while the seats are still in the finished one");
         first.post("/game/act", BridgeHttp.body("action", "quit", "id", null));
         second.post("/game/act", BridgeHttp.body("action", "quit", "id", null));
         AgentGameTest.waitFor("the host ends the match", 30_000, () -> lobby.getHostedMatch() == null);

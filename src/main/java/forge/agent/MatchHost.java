@@ -107,9 +107,14 @@ public final class MatchHost {
 
     /** Starts a match each time the seats are ready, until {@link #close}. */
     void run() throws InterruptedException {
+        // After a match, the seats still read as ready until they leave it, so the next match waits for one to unready.
+        boolean played = false;
         while (!stopped) {
-            // The match stays hosted after its last game, until the seats have left it and the host unreadies them.
-            if (lobby.getHostedMatch() != null || !seatsReady()) {
+            final boolean ready = lobby.getHostedMatch() == null && seatsReady();
+            if (played && lobby.getHostedMatch() == null && !ready) {
+                played = false;
+            }
+            if (played || !ready) {
                 Thread.sleep(POLL_MILLIS);
                 continue;
             }
@@ -125,6 +130,7 @@ public final class MatchHost {
                 continue;
             }
             start.run();
+            played = true;
             log("match started");
         }
     }
