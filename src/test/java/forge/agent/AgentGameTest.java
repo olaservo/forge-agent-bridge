@@ -140,7 +140,11 @@ public class AgentGameTest {
             // produces no event at all), so re-evaluate the current state.
             quiet = 0;
             seen = rev;
-            g = http.get("/game");
+            final JsonObject now = http.get("/game");
+            if (!now.has("gameOver")) {
+                continue; // Forge's client closed a connection that was silent for 45 s and is reconnecting
+            }
+            g = now;
             if (g.get("gameOver").getAsBoolean()) {
                 break;
             }

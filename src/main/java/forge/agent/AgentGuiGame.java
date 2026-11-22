@@ -21,6 +21,8 @@ import forge.game.player.PlayerView;
 import forge.game.spellability.SpellAbilityView;
 import forge.gamemodes.match.Selection;
 import forge.gamemodes.net.NetworkGuiGame;
+import forge.gamemodes.net.client.FGameClient;
+import forge.gui.FThreads;
 import forge.item.PaperCard;
 import forge.localinstance.skin.FSkinProp;
 import forge.trackable.TrackableCollection;
@@ -56,6 +58,8 @@ final class AgentGuiGame extends NetworkGuiGame {
     volatile PendingDecision pending;
     /** Counts games opened, so the session can tell a new game from the one it already set up. */
     volatile int gamesOpened;
+    /** True from the end of a connection until the next game opens. A prompt still queued from that connection is not asked. */
+    private volatile boolean left;
     final List<String> messages = new CopyOnWriteArrayList<>();
 
     AgentGuiGame(final Runnable onChange) {
@@ -75,13 +79,16 @@ final class AgentGuiGame extends NetworkGuiGame {
 
     // ---- decisions ----
 
-    /** Parks this thread until the seat answers. False when interrupted. */
+    /** Parks this thread until the seat answers. False when interrupted, or when the connection ended first. */
     private boolean ask(final PendingDecision d) {
         pending = d;
+        if (left) {
+            d.drop();
+        }
         changed();
         try {
             d.await();
-            return true;
+            return !d.isDropped();
         } catch (final InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
@@ -474,8 +481,42 @@ final class AgentGuiGame extends NetworkGuiGame {
         changed();
     }
 
+    /**
+     * Forgets the game when its connection ends. Forge's client keeps one tracker per connection and merges a
+     * new game view into the one held here. A view kept from an earlier connection is then split between two
+     * trackers. Once the host had sent its whole view again, the zones here stopped following the host.
+     */
+    void leaveGame() {
+        left = true;
+        final PendingDecision d = pending;
+        if (d != null) {
+            d.drop();
+        }
+        FThreads.invokeInEdtAndWait(() -> {
+            setGameView(null);
+            resetForNewMatch();
+            afterGameEnd();
+            myPlayers = null;
+            gameFinished = false;
+            next = new Prompt("", null, next.count, false, "OK", "Cancel", false, false);
+            prompt = next;
+        });
+        changed();
+    }
+
+    /** Forge's client reconnects on a new connection, and the host then sends the game again. */
+    @Override
+    public void onReconnectStateChanged(final FGameClient.ReconnectState state, final int attemptIndex, final int nextDelaySeconds) {
+        if (state != FGameClient.ReconnectState.CONNECTED) {
+            leaveGame();
+        } else {
+            changed();
+        }
+    }
+
     @Override
     public void openView(final TrackableCollection<PlayerView> myPlayers) {
+        left = false;
         this.myPlayers = myPlayers;
         gameFinished = false;
         // The host starts each game believing we hold no selection and sends one only when it changes, so what

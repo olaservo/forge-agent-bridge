@@ -103,6 +103,8 @@ What the seat is asked comes in four forms in the game state:
 - `selection`: the prompt accepts cards (`cards`, answered with `selectCard`) or players (`players`, answered with `selectPlayer`). `chosen` lists what is picked so far, and the attacker being blocked while declaring blockers. Picking the card that reaches `max` answers the prompt without OK.
 - `pendingDecision`: answer with `/game/decide`. While it is there, `prompt` is the decision's prompt and `waiting` and `priorityPrompt` are false. `choices` holds option indices. For kind `assign`, which splits combat damage or a divided amount, send one number per option in `amounts`, or the same as comma-separated `text`; they must add up to the decision's `amount`. A split that breaks a rule is replaced by the bridge's `default` and a line in `messages` says so. Like `/game/act`, it answers once the host has reacted and gone quiet.
 
+The bridge forgets the game when its connection ends: on `/disconnect`, when the host goes away, and while Forge's client is reconnecting. `inGame` is then false and the prompt is empty. When the client gets its seat back the host sends the game again.
+
 `concede` first cancels an open prompt that selects cards or targets. Forge's target prompt asks again without end once the game is over, and the host's game thread died with a StackOverflowError when a seat conceded with one open.
 
 ## Test

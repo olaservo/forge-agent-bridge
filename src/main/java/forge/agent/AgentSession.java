@@ -170,6 +170,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         if (c != null) {
             c.close();
         }
+        gui.leaveGame();
         lobbyData = null;
         mySlot = -1;
         lobbyDeck = null;
@@ -254,7 +255,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     public void close() {
         connected = false;
         closeReason = "connection closed by host or network";
-        changed();
+        gui.leaveGame();
     }
 
     @Override

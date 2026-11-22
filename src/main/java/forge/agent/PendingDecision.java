@@ -20,6 +20,7 @@ final class PendingDecision {
     private final CountDownLatch latch = new CountDownLatch(1);
     private volatile List<Integer> indices;
     private volatile String text;
+    private volatile boolean dropped;
 
     PendingDecision(final int id, final String kind, final String prompt, final List<String> options,
             final int min, final int max, final String defaultAnswer) {
@@ -42,6 +43,16 @@ final class PendingDecision {
         this.indices = indices;
         this.text = text;
         latch.countDown();
+    }
+
+    /** Releases the parked thread without an answer. */
+    void drop() {
+        dropped = true;
+        latch.countDown();
+    }
+
+    boolean isDropped() {
+        return dropped;
     }
 
     void await() throws InterruptedException {

@@ -2,6 +2,7 @@ package forge.agent;
 
 import static org.testng.Assert.assertNotNull;
 
+import java.lang.reflect.Field;
 import java.net.ServerSocket;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -19,15 +20,19 @@ import forge.deck.io.DeckSerializer;
 import forge.game.card.Card;
 import forge.game.player.Player;
 import forge.game.zone.ZoneType;
+import forge.gamemodes.match.HostedMatch;
 import forge.gamemodes.match.LobbySlot;
 import forge.gamemodes.match.LobbySlotType;
 import forge.gamemodes.net.server.FServerManager;
+import forge.gamemodes.net.server.RemoteClient;
 import forge.gamemodes.net.server.ServerGameLobby;
 import forge.gui.GuiBase;
 import forge.interfaces.IUpdateable;
 import forge.localinstance.properties.ForgeNetPreferences.FNetPref;
 import forge.localinstance.properties.ForgePreferences.FPref;
 import forge.model.FModel;
+import forge.player.PlayerControllerHuman;
+import io.netty.channel.Channel;
 
 /**
  * One in-process match for a test that needs a single situation: the host seat is the AI with a
@@ -39,7 +44,8 @@ final class RiggedMatch {
     static final String ME = "AgentBot";
     static final String HOST = "HostAI";
 
-    final ServerGameLobby lobby = new ServerGameLobby();
+    ServerGameLobby lobby;
+    int hostPort;
     final BridgeHttp http;
     private final FServerManager server = FServerManager.getInstance();
     private final AgentBridge bridge = new AgentBridge();
@@ -93,7 +99,15 @@ final class RiggedMatch {
     }
 
     private RiggedMatch(final Deck hostDeck) throws Exception {
-        final int hostPort = freePort();
+        bridge.start(0);
+        http = new BridgeHttp(bridge.port());
+        host(hostDeck);
+    }
+
+    /** Hosts a new lobby on a free port and seats the agent in it. */
+    void host(final Deck hostDeck) throws Exception {
+        hostPort = freePort();
+        lobby = new ServerGameLobby();
         server.startServer(hostPort);
         server.setLobby(lobby);
         lobby.setListener(new IUpdateable() {
@@ -112,8 +126,6 @@ final class RiggedMatch {
         hostSlot.setIsReady(true);
         lobby.setLimitedMode(true);
 
-        bridge.start(0);
-        http = new BridgeHttp(bridge.port());
         http.post("/connect", BridgeHttp.body("host", "127.0.0.1", "port", hostPort, "name", ME));
         AgentGameTest.waitFor("agent takes lobby slot 1", 20_000, () -> http.get("/status").getAsJsonObject("lobby").get("mySlot").getAsInt() == 1);
     }
@@ -227,6 +239,37 @@ final class RiggedMatch {
         act("quit", null);
         AgentGameTest.waitFor("host ends the match", 30_000, () -> !lobby.isMatchActive());
         http.post("/disconnect", new JsonObject());
+    }
+
+    /** Stops the host with the game still on, as a killed host stops. The host's game stays as it was, with nobody to play it. */
+    void killHost() {
+        server.stopServer();
+    }
+
+    /** Closes the host's end of the agent's connection, as a network break does. Forge's client then reconnects by itself. */
+    void dropConnection() throws Exception {
+        final Field channel = RemoteClient.class.getDeclaredField("channel");
+        channel.setAccessible(true);
+        ((Channel) channel.get(server.findClientByIndex(1))).close();
+    }
+
+    /** Has the host send the agent its whole game view again, as it does when the agent reports a checksum mismatch. */
+    void resync() {
+        server.findClientByIndex(1).getGui().setResyncPending();
+    }
+
+    /** True while the host's game thread is parked on the agent's seat, so the host's game is not moving. */
+    boolean hostWaitsOnSeat() {
+        final HostedMatch hosted = lobby.getHostedMatch();
+        if (hosted == null || hosted.getGame() == null || hosted.getGame().isGameOver()) {
+            return false;
+        }
+        for (final PlayerControllerHuman c : hosted.getHumanControllers()) {
+            if (c.getInputQueue().getInput() != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     void close(final String fixturePrefix) throws Exception {
