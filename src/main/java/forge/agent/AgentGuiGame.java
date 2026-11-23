@@ -5,6 +5,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -39,6 +42,16 @@ final class AgentGuiGame extends NetworkGuiGame {
     private final Runnable onChange;
     private final Consumer<FGameClient.ReconnectState> onReconnectState;
     private final AtomicInteger decisionIds = new AtomicInteger();
+
+    /** How long a closed selection may be followed by nothing before the seat is shown as waiting. */
+    private static final long CLOSED_SELECTION_MS = 500;
+    private static final ScheduledExecutorService TIMER = Executors.newSingleThreadScheduledExecutor(r -> {
+        final Thread t = new Thread(r, "Agent-selection-timer");
+        t.setDaemon(true);
+        return t;
+    });
+    /** Counts selections, prompts and buttons, so the timer can tell whether anything followed a closed selection. */
+    private final AtomicInteger displayChanges = new AtomicInteger();
 
     /**
      * The prompt and its buttons, replaced whole so a reader sees them together. {@code count} counts the
@@ -451,8 +464,33 @@ final class AgentGuiGame extends NetworkGuiGame {
         publish();
     }
 
+    /**
+     * A search of the library ends without the host sending "Waiting for ..." (Forge's InputSelectEntitiesFromList
+     * does not ask for it), so the search prompt stayed while the host waited on the other player (#19). When a
+     * selection that offered cards or players closes and no prompt, buttons or selection follow, the seat is
+     * shown as waiting, as awaitNextInput would.
+     */
+    @Override
+    public void setSelection(final Selection sel) {
+        final Selection prev = getSelection();
+        super.setSelection(sel);
+        final int stamp = displayChanges.incrementAndGet();
+        if (offers(prev) && !offers(sel)) {
+            TIMER.schedule(() -> FThreads.invokeInEdtNowOrLater(() -> {
+                if (displayChanges.get() == stamp && !next.waiting() && !left && !gameFinished) {
+                    awaitNextInput();
+                }
+            }), CLOSED_SELECTION_MS, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private static boolean offers(final Selection sel) {
+        return sel != null && (!sel.cards().isEmpty() || !sel.targets().isEmpty());
+    }
+
     @Override
     public void showPromptMessage(final PlayerView playerView, final String message, final CardView card) {
+        displayChanges.incrementAndGet();
         // Cancels the host's 250 ms timer that would replace this prompt with "Waiting for ...", as the desktop does.
         cancelAwaitNextInput();
         next = new Prompt(message == null ? "" : message, card, next.count + 1, false, next.okLabel, next.cancelLabel,
@@ -463,6 +501,7 @@ final class AgentGuiGame extends NetworkGuiGame {
     @Override
     public void updateButtons(final PlayerView owner, final String label1, final String label2, final boolean enable1,
             final boolean enable2, final boolean focus1) {
+        displayChanges.incrementAndGet();
         cancelAwaitNextInput();
         next = new Prompt(next.message, next.card, next.count, false, label1, label2, enable1, enable2);
         publish();

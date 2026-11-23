@@ -23,6 +23,7 @@ import forge.game.zone.ZoneType;
 import forge.gamemodes.match.HostedMatch;
 import forge.gamemodes.match.LobbySlot;
 import forge.gamemodes.match.LobbySlotType;
+import forge.gamemodes.match.Selection;
 import forge.gamemodes.net.server.FServerManager;
 import forge.gamemodes.net.server.RemoteClient;
 import forge.gamemodes.net.server.ServerGameLobby;
@@ -253,6 +254,16 @@ final class RiggedMatch {
         ((Channel) channel.get(server.findClientByIndex(1))).close();
     }
 
+    /** Has the host send the agent's seat a selection, as an input that offers cards does when it starts and stops. */
+    void hostSelects(final Selection selection) {
+        server.findClientByIndex(1).getGui().setSelection(selection);
+    }
+
+    /** Has the host send the agent's seat a prompt, as the start of its next input does. */
+    void hostPrompts(final String message) {
+        server.findClientByIndex(1).getGui().showPromptMessage(null, message);
+    }
+
     /** Has the host send the agent its whole game view again, as it does when the agent reports a checksum mismatch. */
     void resync() {
         server.findClientByIndex(1).getGui().setResyncPending();
@@ -298,6 +309,10 @@ final class RiggedMatch {
             out.add(c.getId());
         }
         return out;
+    }
+
+    Card hostCard(final String player, final ZoneType zone) {
+        return hostPlayer(player).getCardsIn(zone).getFirst();
     }
 
     int hostLife(final String player) {
