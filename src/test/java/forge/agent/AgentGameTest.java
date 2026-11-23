@@ -205,7 +205,9 @@ public class AgentGameTest {
             } else if (System.currentTimeMillis() - lastCardSelect > 2_000) {
                 // A prompt that accepts only some cards says which in selection (a discard of the highest mana value).
                 final JsonArray offered = g.has("selection") ? g.getAsJsonObject("selection").getAsJsonArray("cards") : new JsonArray();
-                final JsonObject card = offered.isEmpty() ? firstCardInHand(g) : offered.get(0).getAsJsonObject();
+                // A prompt that takes several cards: picking the first again would unpick it (Curse of the Cabal, sacrifice 2).
+                final Integer next = RiggedMatch.required(g);
+                final JsonObject card = offered.isEmpty() ? firstCardInHand(g) : next != null ? byId(offered, next) : offered.get(0).getAsJsonObject();
                 if (card != null) {
                     actions++;
                     lastCardSelect = System.currentTimeMillis();
@@ -272,6 +274,15 @@ public class AgentGameTest {
             }
         }
         return null;
+    }
+
+    private static JsonObject byId(final JsonArray cards, final int id) {
+        for (final JsonElement c : cards) {
+            if (c.getAsJsonObject().get("id").getAsInt() == id) {
+                return c.getAsJsonObject();
+            }
+        }
+        return cards.get(0).getAsJsonObject();
     }
 
     private static JsonObject firstCardInHand(final JsonObject g) {
