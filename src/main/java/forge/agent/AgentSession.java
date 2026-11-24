@@ -777,7 +777,19 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
                 controller().selectButtonOk();
                 settle(seen);
             }
-            if (opts.pass() && ownItemOnTop()) {
+            final boolean click = !"ok".equals(action) && !"endTurn".equals(action);
+            if (click && opts.endTurn() && ownItemOnTop()) {
+                // The action cast a spell or activated an ability: the rest of the turn passes with it. Only with
+                // the seat's own item on the stack, so a card the host refused does not end the turn.
+                seen = revision.get();
+                actingThread = Thread.currentThread();
+                try {
+                    send("endTurn", null, null, Act.PLAIN);
+                } finally {
+                    actingThread = null;
+                }
+                settle(seen);
+            } else if (opts.pass() && ownItemOnTop()) {
                 seen = revision.get();
                 controller().sendYieldUpdate(new YieldUpdate.StackYield(gui.getCurrentPlayer(), true, true));
                 settle(seen);
@@ -788,7 +800,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
 
     /**
      * How an action is sent. {@code once}: OK passes priority one time, where it would yield until the stack
-     * is empty. {@code endTurn}: with OK, also yield until end of turn. {@code autoPay}: press Auto if the
+     * is empty. {@code endTurn}: with OK, also yield until end of turn; with another action, yield until end of
+     * turn if it put the seat's own spell or ability on the stack. {@code autoPay}: press Auto if the
      * action leads to the prompt that pays a cost. {@code pass}: afterwards, pass priority if the seat's own
      * spell or ability is on top of the stack. {@code at}: send only while this is the prompt count.
      */

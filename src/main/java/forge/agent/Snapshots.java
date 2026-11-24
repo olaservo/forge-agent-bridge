@@ -315,6 +315,12 @@ final class Snapshots {
                     targets.add(t.getName());
                 }
             }
+            // A spell that targets a spell, as a counterspell does: the name of what that item came from.
+            if (si.getTargetStackItems() != null) {
+                for (final StackItemView t : si.getTargetStackItems()) {
+                    targets.add(t.getSourceCard() == null ? String.valueOf(t.getText()) : t.getSourceCard().getName());
+                }
+            }
             sm.put("targets", targets);
             stack.add(sm);
         }

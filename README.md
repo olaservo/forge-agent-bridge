@@ -66,8 +66,10 @@ The game summary reports `stops`. A phase with something on the stack is always 
 `POST /game/act` uses Forge's yields in three places:
 
 - `ok` on the priority prompt, with the seat's own spell or ability on top of the stack, yields until the stack is empty. The host passes for the seat until then and stops when an opponent adds to the stack or attacks. `"once": true` passes one time.
-- `endTurn` yields until the end of the turn, which is what the End Turn button does. It works whatever the Cancel button reads. With `ok` on another prompt, such as declaring attackers, `"endTurn": true` answers that prompt and yields the rest of the turn.
+- `endTurn` yields until the end of the turn, which is what the End Turn button does. It works whatever the Cancel button reads. With `ok` on another prompt, such as declaring attackers, `"endTurn": true` answers that prompt and yields the rest of the turn. With an action that casts a spell or activates an ability, `"endTurn": true` yields the rest of the turn once the seat's own item is on the stack, so the spell resolves and the turn ends in one call. An action the host refuses puts nothing on the stack and ends nothing.
 - `"pass": true` on any action passes afterwards if the seat's own spell or ability is then on top of the stack, with the same yield.
+
+A yield never passes over an opponent's response. When an opponent adds to the stack or attacks the seat, the yield ends and the host asks the seat before anything resolves. After `endTurn` on its own turn the bridge also switches auto-pass on, as after the End Turn button, so the host then asks only a seat with something it could play. `AgentInterruptTest` plays both against a host that counters the seat's spell.
 
 The bridge sets the yield preferences it relies on after the stops: a yield ends on an opponent's spell or attack, and the host does not offer its own yield suggestions. The other yield preferences come from the Forge profile on the bridge's machine.
 
@@ -114,7 +116,7 @@ All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 - `POST /draft/deck {main, lands, landSet}`: builds the deck for the match from the pool, sends it to the host and saves it over the pool file, as the desktop's deck editor does. `main` lists pool card names, one entry per copy. `lands` maps basic land names to counts. `landSet` is the set code for the lands and defaults to the set most of the pool comes from. Cards left in the pool become the sideboard. `problem` is null when the deck is legal for Limited. `lobby.myDeck` in the status then shows the deck's name and sizes, because the host does not send a seat's deck back.
 - `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}` or `{id, amounts}`, `POST /game/yield {autoPass}`
 - `POST /game/act` also takes `once`, `endTurn` and `pass` (see Stops and yields), `"pay": "auto"`, which presses Auto when the action leads to the prompt that pays a cost, and `at`, a `promptCount`. When `at` is not the current count the action is not sent and the answer has `stale: true`.
-- `messageCount` counts the game's `messages` and `logCount` the lines of the game log, so a caller can ask for what is new. In `GET /game` each player has `mana`, the mana floating in its pool by colour letter (`W`, `U`, `B`, `R`, `G`, `C`), and each stack item has `targets`, cards as `name#id` and players by name.
+- `messageCount` counts the game's `messages` and `logCount` the lines of the game log, so a caller can ask for what is new. In `GET /game` each player has `mana`, the mana floating in its pool by colour letter (`W`, `U`, `B`, `R`, `G`, `C`), and each stack item has `targets`, cards as `name#id`, players by name, and another stack item by the name of its source. `stack` is listed from the top down.
 
 What the seat is asked comes in four forms in the game state:
 

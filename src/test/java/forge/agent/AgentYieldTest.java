@@ -22,7 +22,7 @@ import com.google.gson.JsonObject;
  * The seat is asked for priority on an empty stack only in its own main phases. One game then goes through:
  * a cast paid with {@code pay: "auto"}, an OK with {@code once} that leaves the trigger to be passed, an OK
  * that yields until the stack is empty, a cast with {@code pass} that resolves spell and trigger in one call,
- * an attack with {@code endTurn}, an action refused by {@code at}, and the {@code endTurn} action.
+ * an attack with {@code endTurn}, an action refused by {@code at}, the {@code endTurn} action, and a cast with {@code endTurn}.
  */
 public class AgentYieldTest {
 
@@ -59,7 +59,7 @@ public class AgentYieldTest {
         int turnSeen = -1;
         int forestsAtTurnStart = 0;
         final long deadline = System.currentTimeMillis() + 360_000;
-        while (stage < 4) {
+        while (stage < 5) {
             final JsonObject g = match.next();
             assertTrue(System.currentTimeMillis() < deadline, "stage " + stage + " not reached in time; asks " + asks + "; last state " + g);
             assertFalse(g.get("gameOver").getAsBoolean(), "the game ended early: " + g);
@@ -92,6 +92,10 @@ public class AgentYieldTest {
             } else if (stage == 3 && myMain) {
                 endTurnFromTheMainPhase(turn);
                 stage = 4;
+                stageTurn = turn;
+            } else if (stage == 4 && canCast) {
+                castAndEndTurn(visionary.get("id").getAsInt(), turn, RiggedMatch.card(me, "hand", "Forest"));
+                stage = 5;
             } else {
                 match.basics(g, "Forest", "no spell", 99);
             }
@@ -179,6 +183,26 @@ public class AgentYieldTest {
         assertFalse(sent.has("stale"), "the current prompt count is accepted: " + sent);
         nothingAskedUntilTheHostsTurn(turn);
         assertEquals(match.hostLife(RiggedMatch.HOST), life, "no attack was declared");
+    }
+
+    /**
+     * A cast with {@code endTurn}: the spell and its trigger resolve and the turn ends, in one call. A card the
+     * host refuses, here a second land, puts nothing on the stack and does not end the turn.
+     */
+    private void castAndEndTurn(final int id, final int turn, final JsonObject secondLand) throws Exception {
+        if (secondLand != null) {
+            act("selectCard", secondLand.get("id").getAsInt(), "endTurn", true);
+            final JsonObject g = match.http.get("/game");
+            assertTrue(asked(g) && g.get("turn").getAsInt() == turn && stack(g).isEmpty(), "a refused card does not end the turn: " + g);
+        }
+        JsonObject g = match.http.get("/game");
+        final int onBattlefield = count(RiggedMatch.me(g), "battlefield", VISIONARY);
+        final int hand = RiggedMatch.me(g).get("handSize").getAsInt();
+        act("selectCard", id, "pay", "auto", "endTurn", true);
+        nothingAskedUntilTheHostsTurn(turn);
+        g = match.http.get("/game");
+        assertEquals(count(RiggedMatch.me(g), "battlefield", VISIONARY), onBattlefield + 1, "the spell resolved: " + g);
+        assertEquals(RiggedMatch.me(g).get("handSize").getAsInt(), hand, "and its trigger drew a card for the one cast: " + g);
     }
 
     private void nothingAskedUntilTheHostsTurn(final int turn) throws Exception {
