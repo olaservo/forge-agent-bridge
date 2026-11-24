@@ -141,6 +141,7 @@ public class AgentYieldTest {
             final JsonObject g = match.next();
             assertTrue(System.currentTimeMillis() < deadline, "the spell did not resolve: " + g);
             assertFalse(asked(g) && !stack(g).isEmpty(), "no ask while the seat's own spell and trigger resolve: " + g);
+            assertFalse(!stack(g).isEmpty() && answerable(g), "the prompt that says the seat is yielding asks nothing: " + g);
             if (asked(g) && count(RiggedMatch.me(g), "battlefield", VISIONARY) == before + 1) {
                 return;
             }
@@ -186,8 +187,7 @@ public class AgentYieldTest {
             final JsonObject g = match.next();
             assertTrue(System.currentTimeMillis() < deadline, "the turn did not end: " + g);
             final boolean sameTurn = g.get("turn").getAsInt() == turn;
-            final boolean anyButton = g.getAsJsonObject("buttons").get("okEnabled").getAsBoolean();
-            assertFalse(sameTurn && !g.get("waiting").getAsBoolean() && anyButton, "nothing is asked for the rest of the turn: " + g);
+            assertFalse(sameTurn && answerable(g), "nothing is asked for the rest of the turn: " + g);
             if (!sameTurn) {
                 return;
             }
@@ -206,6 +206,13 @@ public class AgentYieldTest {
     private static boolean asked(final JsonObject g) {
         return g.get("priorityPrompt").getAsBoolean() && !g.get("waiting").getAsBoolean() && AgentGameTest.iHavePriority(g)
                 && g.getAsJsonObject("buttons").get("okEnabled").getAsBoolean();
+    }
+
+    /** True for a prompt the seat could answer, as forge-mcp-server reads it: not waiting, with a button enabled. */
+    private static boolean answerable(final JsonObject g) {
+        final JsonObject buttons = g.getAsJsonObject("buttons");
+        return !g.get("waiting").getAsBoolean() && !g.get("prompt").getAsString().isBlank()
+                && (buttons.get("okEnabled").getAsBoolean() || buttons.get("cancelEnabled").getAsBoolean());
     }
 
     private static JsonArray stack(final JsonObject g) {
