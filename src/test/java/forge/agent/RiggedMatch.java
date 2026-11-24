@@ -182,6 +182,8 @@ final class RiggedMatch {
             http.post("/game/decide", BridgeHttp.body("id", d.get("id").getAsInt(), "choices", choices, "text", split ? d.get("default").getAsString() : null));
         } else if (required(g) != null) {
             act("selectCard", required(g));
+        } else if (g.get("waiting").getAsBoolean()) {
+            // The other player is acting, or the bridge is answering this prompt for the seat.
         } else if (!AgentGameTest.iHavePriority(g) && g.get("prompt").getAsString().startsWith("Waiting for")) {
             // The other player is acting.
         } else if ("Auto".equals(buttons.get("ok").getAsString())) {

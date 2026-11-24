@@ -46,13 +46,30 @@ With `--exit-with-parent` the bridge exits when the process that started it ends
 
 Forge has a per-player setting that passes priority for a player who has no available actions. The bridge sends it to the host for its seat, in one of three modes:
 
-- `opponent-turns` (default): on during opponents' turns, off during the seat's own turn and from the opponent's end step.
+- `opponent-turns` (default): on during opponents' turns, off during the seat's own turn and from the opponent's end step. Off that early, the setting has reached the host before the seat's main phase. The host then asks in that end step, and the bridge presses OK itself when the host lists no card the seat could play (`actionable` is empty), so the seat is asked there only when it could act. The summary shows `waiting: true` for a prompt the bridge is answering.
 - `always`: on for the whole game.
 - `off`: never.
 
 Start with `--auto-pass <mode>`, or switch during a game with `POST /game/yield {"autoPass": "<mode>"}`. The game summary reports `autoPass` (the mode) and `autoPassNow` (what the host was last told).
 
 `always` is not safe. Forge decides "no available actions" by looking at the hand, the battlefield and flashback cards (`forge.ai.AvailableActions`). It does not look at other graveyard casts or abilities, and it does not count mana from a graveyard ability. In a live game on 2026-11-11 that skipped the seat's main phase while it could cast a card with disturb from its graveyard. On an opponent's turn the same gap can still hide an instant-speed play from the graveyard. Declaring attackers and blockers and answering choices are separate prompts and are still asked in every mode.
+
+## Stops and yields
+
+A Forge client tells the host where its player wants to stop, and the host passes priority for that player everywhere else while the stack is empty. The bridge sends the host its stops when a game opens, as the desktop client does:
+
+- `default`: Forge's desktop defaults. On the seat's own turn it is asked in main 1, after blockers are declared, and in main 2. On an opponent's turn it is asked at beginning of combat, after attackers are declared, after blockers are declared, and in the end step. Auto-pass above removes those when the seat has nothing to play.
+- `all`: every phase, as the bridge did up to 0.1.9. Start with `--stops all`.
+
+The game summary reports `stops`. A phase with something on the stack is always asked, and so are declaring attackers and blockers and answering choices.
+
+`POST /game/act` uses Forge's yields in three places:
+
+- `ok` on the priority prompt, with the seat's own spell or ability on top of the stack, yields until the stack is empty. The host passes for the seat until then and stops when an opponent adds to the stack or attacks. `"once": true` passes one time.
+- `endTurn` yields until the end of the turn, which is what the End Turn button does. It works whatever the Cancel button reads. With `ok` on another prompt, such as declaring attackers, `"endTurn": true` answers that prompt and yields the rest of the turn.
+- `"pass": true` on any action passes afterwards if the seat's own spell or ability is then on top of the stack, with the same yield.
+
+The bridge sets the yield preferences it relies on after the stops: a yield ends on an opponent's spell or attack, and the host does not offer its own yield suggestions. The other yield preferences come from the Forge profile on the bridge's machine.
 
 ## Auto-join
 
@@ -96,6 +113,8 @@ All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 - `GET /draft/pack`, `POST /draft/pick {card}`, `GET /draft/pool`. `packNumber` and `pickNumber` count from 1. `secondsLeft` is sent while a pick is waiting and the host set a pick clock. The pool of a sealed event arrives the same way, with no packs before it.
 - `POST /draft/deck {main, lands, landSet}`: builds the deck for the match from the pool, sends it to the host and saves it over the pool file, as the desktop's deck editor does. `main` lists pool card names, one entry per copy. `lands` maps basic land names to counts. `landSet` is the set code for the lands and defaults to the set most of the pool comes from. Cards left in the pool become the sideboard. `problem` is null when the deck is legal for Limited. `lobby.myDeck` in the status then shows the deck's name and sizes, because the host does not send a seat's deck back.
 - `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}` or `{id, amounts}`, `POST /game/yield {autoPass}`
+- `POST /game/act` also takes `once`, `endTurn` and `pass` (see Stops and yields), `"pay": "auto"`, which presses Auto when the action leads to the prompt that pays a cost, and `at`, a `promptCount`. When `at` is not the current count the action is not sent and the answer has `stale: true`.
+- `messageCount` counts the game's `messages` and `logCount` the lines of the game log, so a caller can ask for what is new. In `GET /game` each player has `mana`, the mana floating in its pool by colour letter (`W`, `U`, `B`, `R`, `G`, `C`), and each stack item has `targets`, cards as `name#id` and players by name.
 
 What the seat is asked comes in four forms in the game state:
 
@@ -105,7 +124,7 @@ What the seat is asked comes in four forms in the game state:
 - `selection`: the prompt accepts cards (`cards`, answered with `selectCard`) or players (`players`, answered with `selectPlayer`). `chosen` lists what is picked so far, and the attacker being blocked while declaring blockers. Picking the card that reaches `max` answers the prompt without OK.
 - `pendingDecision`: answer with `/game/decide`. While it is there, `prompt` is the decision's prompt and `waiting` and `priorityPrompt` are false. `choices` holds option indices. For kind `assign`, which splits combat damage or a divided amount, send one number per option in `amounts`, or the same as comma-separated `text`; they must add up to the decision's `amount`. A split that breaks a rule is replaced by the bridge's `default` and a line in `messages` says so. Like `/game/act`, it answers once the host has reacted and gone quiet.
 
-The bridge forgets the game when its connection ends: on `/disconnect`, when the host goes away, and while Forge's client is reconnecting. `inGame` is then false and the prompt is empty. When the client gets its seat back the host sends the game again.
+The bridge forgets the game when its connection ends: on `/disconnect`, when the host goes away, and while Forge's client is reconnecting. `inGame` is then false, the prompt is empty and `messages` is cleared. When the client gets its seat back the host sends the game again.
 
 `concede` first cancels an open prompt that selects cards or targets. Forge's target prompt asks again without end once the game is over, and the host's game thread died with a StackOverflowError when a seat conceded with one open.
 

@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+import forge.card.mana.ManaAtom;
 import forge.deck.Deck;
 import forge.deck.DeckSection;
 import forge.game.GameEntityView;
@@ -34,6 +35,9 @@ import forge.util.collect.FCollectionView;
  * output schemas name the same fields, and its fixture test fails when the two differ.
  */
 final class Snapshots {
+
+    /** In the order of {@code ManaAtom.MANATYPES}. */
+    private static final String[] MANA_LETTERS = {"W", "U", "B", "R", "G", "C"};
 
     private Snapshots() {
     }
@@ -208,7 +212,8 @@ final class Snapshots {
         final boolean deciding = d != null && !d.isAnswered();
         // The host sends no prompt when the game ends, so the last one would stay.
         final boolean over = gv != null && gv.isGameOver();
-        final boolean waiting = !over && !deciding && prompt.waiting();
+        // A prompt the bridge answers for the seat asks the seat nothing.
+        final boolean waiting = !over && !deciding && (prompt.waiting() || gui.answering == prompt.count());
         // A decision is what the seat is asked while it is pending. The host's prompt under it can read "Waiting for ...".
         m.put("prompt", over ? "Game over. Winner: " + Objects.toString(gv.getWinningPlayerName(), "") : deciding ? d.prompt : prompt.message());
         m.put("promptCount", prompt.count());
@@ -237,6 +242,9 @@ final class Snapshots {
             m.put("pendingDecision", dm);
         }
         m.put("messages", tail(gui.messages, 10));
+        // Counts for a caller that wants only what is new: messages this game, and lines in the game log.
+        m.put("messageCount", gui.messages.size());
+        m.put("logCount", gv == null || gv.getGameLog() == null ? 0 : gv.getGameLog().getAllEntries().size());
         if (gv == null) {
             return m;
         }
@@ -252,6 +260,7 @@ final class Snapshots {
         m.put("hasPriority", me == null ? null : !over && !waiting && me.getHasPriority());
         m.put("autoPass", autoPass.mode());
         m.put("autoPassNow", autoPass.now());
+        m.put("stops", gui.stops);
         if (!full) {
             return m;
         }
@@ -271,6 +280,15 @@ final class Snapshots {
             pm.put("librarySize", p.getZoneSize(ZoneType.Library));
             pm.put("graveyardSize", p.getZoneSize(ZoneType.Graveyard));
             pm.put("exileSize", p.getZoneSize(ZoneType.Exile));
+            // Mana floating in the pool, by the letter of its colour. Empty when there is none.
+            final Map<String, Integer> mana = new LinkedHashMap<>();
+            for (int i = 0; i < ManaAtom.MANATYPES.length; i++) {
+                final int amount = p.getMana(ManaAtom.MANATYPES[i]);
+                if (amount > 0) {
+                    mana.put(MANA_LETTERS[i], amount);
+                }
+            }
+            pm.put("mana", mana);
             pm.put("battlefield", cards(p.getBattlefield()));
             pm.put("graveyard", cards(p.getGraveyard()));
             if (me != null && me.getId() == p.getId()) {
@@ -286,6 +304,18 @@ final class Snapshots {
             sm.put("source", si.getSourceCard() == null ? null : si.getSourceCard().getName());
             sm.put("by", si.getActivatingPlayer() == null ? null : si.getActivatingPlayer().getName());
             sm.put("text", si.getText());
+            final List<String> targets = new ArrayList<>();
+            if (si.getTargetCards() != null) {
+                for (final CardView t : si.getTargetCards()) {
+                    targets.add(t.getName() + "#" + t.getId());
+                }
+            }
+            if (si.getTargetPlayers() != null) {
+                for (final PlayerView t : si.getTargetPlayers()) {
+                    targets.add(t.getName());
+                }
+            }
+            sm.put("targets", targets);
             stack.add(sm);
         }
         m.put("stack", stack);

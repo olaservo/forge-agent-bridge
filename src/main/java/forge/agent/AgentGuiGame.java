@@ -1,9 +1,11 @@
 package forge.agent;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -16,6 +18,7 @@ import com.google.common.collect.Lists;
 import forge.LobbyPlayer;
 import forge.deck.CardPool;
 import forge.game.GameEntityView;
+import forge.game.GameView;
 import forge.game.card.CardView;
 import forge.game.card.CardView.CardStateView;
 import forge.game.phase.PhaseType;
@@ -64,6 +67,23 @@ final class AgentGuiGame extends NetworkGuiGame {
     }
 
     volatile Prompt prompt = new Prompt("", null, 0, false, "OK", "Cancel", false, false);
+
+    /** Where the host stops for the seat on an empty stack: Forge's desktop defaults, or every phase. */
+    static final String STOPS_DEFAULT = "default";
+    static final String STOPS_ALL = "all";
+    private static final Set<PhaseType> OWN_STOPS = EnumSet.of(PhaseType.MAIN1, PhaseType.COMBAT_DECLARE_BLOCKERS, PhaseType.MAIN2);
+    private static final Set<PhaseType> OPPONENT_STOPS = EnumSet.of(PhaseType.COMBAT_BEGIN, PhaseType.COMBAT_DECLARE_ATTACKERS,
+            PhaseType.COMBAT_DECLARE_BLOCKERS, PhaseType.END_OF_TURN);
+    volatile String stops = STOPS_DEFAULT;
+
+    /** How long the bridge may take to answer a prompt for the seat before the seat is asked after all. */
+    private static final long ANSWER_MS = 2500;
+    /** Says whether the bridge answers a prompt for the seat. Asked on the Agent-EDT thread as the prompt arrives. */
+    volatile java.util.function.Predicate<Prompt> answersItself = p -> false;
+    /** The count of a prompt the bridge answers for the seat, or -1. The seat is shown as waiting on it. */
+    volatile int answering = -1;
+    /** The count of that prompt once its buttons have arrived with OK enabled, or -1. */
+    volatile int answerReady = -1;
     /** The prompt being built. Written on the Agent-EDT thread only, like every display call. */
     private Prompt next = prompt;
     private boolean batching;
@@ -495,6 +515,18 @@ final class AgentGuiGame extends NetworkGuiGame {
         cancelAwaitNextInput();
         next = new Prompt(message == null ? "" : message, card, next.count + 1, false, next.okLabel, next.cancelLabel,
                 next.okEnabled, next.cancelEnabled);
+        // The priority prompt arrives as its selection, its text and then its buttons (InputPassPriority).
+        answerReady = -1;
+        answering = answersItself.test(next) ? next.count : -1;
+        if (answering >= 0) {
+            final int count = next.count;
+            TIMER.schedule(() -> FThreads.invokeInEdtNowOrLater(() -> {
+                if (answering == count) {
+                    answering = -1;
+                    changed();
+                }
+            }), ANSWER_MS, TimeUnit.MILLISECONDS);
+        }
         publish();
     }
 
@@ -504,6 +536,9 @@ final class AgentGuiGame extends NetworkGuiGame {
         displayChanges.incrementAndGet();
         cancelAwaitNextInput();
         next = new Prompt(next.message, next.card, next.count, false, label1, label2, enable1, enable2);
+        if (answering == next.count && enable1) {
+            answerReady = next.count;
+        }
         publish();
     }
 
@@ -543,6 +578,7 @@ final class AgentGuiGame extends NetworkGuiGame {
             next = new Prompt("", null, next.count, false, "OK", "Cancel", false, false);
             prompt = next;
         });
+        messages.clear();
         changed();
     }
 
@@ -586,8 +622,29 @@ final class AgentGuiGame extends NetworkGuiGame {
     public void setPlayerAvatar(final LobbyPlayer player, final IHasIcon ihi) {
     }
 
+    /**
+     * The desktop answers this from its phase labels, which start at Forge's preferences PHASE_HUMAN_* for the
+     * player's own turn and PHASE_AI_* for an opponent's. The untap step has no label there.
+     */
     @Override
     public boolean isUiSetToSkipPhase(final PlayerView playerTurn, final PhaseType phase) {
-        return false;
+        final PlayerView me = getCurrentPlayer();
+        if (STOPS_ALL.equals(stops) || playerTurn == null || phase == null || phase == PhaseType.UNTAP || me == null) {
+            return false;
+        }
+        return !(me.getId() == playerTurn.getId() ? OWN_STOPS : OPPONENT_STOPS).contains(phase);
+    }
+
+    /**
+     * Sends the host the phases to skip for the seat, as the desktop does when a game opens. The host keeps
+     * them per game and has none until a client sends them. False while the game view has no players yet.
+     */
+    boolean seedStops() {
+        final GameView gv = getGameView();
+        if (gv == null || gv.getPlayers() == null || getCurrentPlayer() == null) {
+            return false;
+        }
+        seedYieldStateOnHost();
+        return true;
     }
 }

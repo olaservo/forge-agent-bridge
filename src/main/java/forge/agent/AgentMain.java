@@ -11,7 +11,7 @@ import forge.model.FModel;
 /**
  * A headless Forge network client behind a local HTTP JSON API, for forge-mcp-server. Runs until killed.
  * Start it with Forge's own jar on the classpath, from the folder that holds Forge's {@code res}:
- * {@code java -cp <this jar><path separator><forge jar> forge.agent.AgentMain [--port N] [--auto-pass off|opponent-turns|always]
+ * {@code java -cp <this jar><path separator><forge jar> forge.agent.AgentMain [--port N] [--auto-pass off|opponent-turns|always] [--stops default|all]
  * [--auto-join host:port] [--auto-join-name NAME] [--auto-join-deck DECK] [--exit-with-parent]}.
  */
 public final class AgentMain {
@@ -24,6 +24,7 @@ public final class AgentMain {
     public static void main(final String[] args) {
         int port = 36744;
         String autoPass = AgentSession.AUTO_PASS_OPPONENT_TURNS;
+        String stops = AgentGuiGame.STOPS_DEFAULT;
         String autoJoin = null;
         String autoJoinName = "Agent";
         String autoJoinDeck = null;
@@ -32,6 +33,8 @@ public final class AgentMain {
                 port = Integer.parseInt(args[++i]);
             } else if ("--auto-pass".equals(args[i]) && i + 1 < args.length) {
                 autoPass = args[++i];
+            } else if ("--stops".equals(args[i]) && i + 1 < args.length) {
+                stops = args[++i];
             } else if ("--auto-join".equals(args[i]) && i + 1 < args.length) {
                 autoJoin = args[++i];
             } else if ("--auto-join-name".equals(args[i]) && i + 1 < args.length) {
@@ -70,6 +73,7 @@ public final class AgentMain {
 
         final AgentBridge bridge = new AgentBridge();
         bridge.setAutoPass(autoPass);
+        bridge.setStops(stops);
         try {
             bridge.start(port);
         } catch (final Exception e) {

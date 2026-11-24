@@ -6,9 +6,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 
@@ -20,9 +22,11 @@ import forge.game.GameView;
 import forge.game.card.CardView;
 import forge.game.phase.PhaseType;
 import forge.game.player.PlayerView;
+import forge.game.spellability.StackItemView;
 import forge.gamemodes.match.GameLobby.GameLobbyData;
 import forge.gamemodes.match.NextGameDecision;
 import forge.gamemodes.match.Selection;
+import forge.gamemodes.match.YieldUpdate;
 import forge.gamemodes.net.ChatMessage;
 import forge.gamemodes.net.client.ClientGameLobby;
 import forge.gamemodes.net.client.FGameClient;
@@ -96,6 +100,44 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private volatile int yieldSentForGame;
     /** The game for which the host was asked to list actionable cards. */
     private volatile int highlightsSentForGame;
+    /** When that was, and how long the host is given to take it up before an empty list is believed. */
+    private volatile long highlightsSentAt;
+    private static final long HIGHLIGHTS_SETTLE_MILLIS = 2000;
+    /** The count of the last prompt the bridge answered for the seat. */
+    private final AtomicInteger answered = new AtomicInteger(-1);
+    private static final ExecutorService ANSWERS = Executors.newSingleThreadExecutor(r -> {
+        final Thread t = new Thread(r, "Agent-Answers");
+        t.setDaemon(true);
+        return t;
+    });
+
+    {
+        gui.answersItself = this::answersItself;
+    }
+
+    /** The game for which the host was sent the seat's stops. */
+    private volatile int seededForGame;
+    /**
+     * Yield settings the bridge relies on, sent after the stops. The seed carries this machine's Forge
+     * preferences for them, and without a seed the host uses its own.
+     */
+    private static final Map<FPref, String> YIELD_SETTINGS = yieldSettings();
+
+    private static Map<FPref, String> yieldSettings() {
+        final Map<FPref, String> m = new LinkedHashMap<>();
+        // What ends a yield until the stack is empty or until end of turn.
+        m.put(FPref.YIELD_INTERRUPT_ON_OPPONENT_SPELL, "true");
+        m.put(FPref.YIELD_INTERRUPT_ON_ATTACKERS, "true");
+        m.put(FPref.YIELD_INTERRUPT_ON_TARGETING, "false");
+        m.put(FPref.YIELD_INTERRUPT_ON_TRIGGERS, "false");
+        m.put(FPref.YIELD_INTERRUPT_ON_REVEAL, "false");
+        m.put(FPref.YIELD_INTERRUPT_ON_MASS_REMOVAL, "false");
+        m.put(FPref.YIELD_AUTO_PASS_RESPECTS_INTERRUPTS, "false");
+        // Anything else makes the host offer a yield with Accept and Decline buttons in place of the priority prompt.
+        m.put(FPref.YIELD_DECLINE_SCOPE_STACK_YIELD, "NEVER");
+        m.put(FPref.YIELD_DECLINE_SCOPE_NO_ACTIONS, "NEVER");
+        return m;
+    }
     /** The turn of ours on which we pressed End Turn, or -1. */
     private volatile int endedTurn = -1;
     /** The last turn seen in a phase before its end step, and whether it was ours. Read and written under {@code yieldLock}. */
@@ -131,8 +173,53 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         return revision.get();
     }
 
+    /**
+     * The opponent's end step with an empty stack and no card the host lists as playable. Auto-pass is off by
+     * then, so that the setting has reached the host before the seat's own main phase, and the host asks. The
+     * host fills that list and its "no available actions" flag from one scan and sends the list before the
+     * prompt, so an empty list is what auto-pass would have passed on.
+     */
+    private boolean answersItself(final AgentGuiGame.Prompt p) {
+        if (!AUTO_PASS_OPPONENT_TURNS.equals(autoPass) || gui.gamesOpened != highlightsSentForGame
+                || System.currentTimeMillis() - highlightsSentAt < HIGHLIGHTS_SETTLE_MILLIS) {
+            return false;
+        }
+        final GameView gv = gui.getGameView();
+        final PlayerView me = gui.getCurrentPlayer();
+        if (gv == null || me == null || gv.getPlayerTurn() == null || gv.getPlayerTurn().getId() == me.getId()) {
+            return false;
+        }
+        if (gv.getPhase() != PhaseType.END_OF_TURN || gv.peekStack() != null || !p.message().startsWith(priorityPrefix())) {
+            return false;
+        }
+        final Selection sel = gui.getSelection();
+        return sel != null && sel.actionable().isEmpty();
+    }
+
+    /** Presses OK on the prompt the bridge answers for the seat, unless the prompt has changed. */
+    private void answer(final int count) {
+        synchronized (actLock) {
+            final AgentGuiGame.Prompt p = gui.prompt;
+            if (p.count() != count || p.waiting() || !p.okEnabled() || gui.answering != count) {
+                return;
+            }
+            actingThread = Thread.currentThread();
+            try {
+                controller().selectButtonOk();
+            } catch (final RuntimeException e) {
+                System.err.println("[agent] could not pass the opponent's end step: " + e);
+            } finally {
+                actingThread = null;
+            }
+        }
+    }
+
     private void changed() {
         sendYieldPrefs(false);
+        final int ready = gui.answerReady;
+        if (ready >= 0 && ready == gui.answering && answered.getAndSet(ready) != ready) {
+            ANSWERS.execute(() -> answer(ready));
+        }
         revision.incrementAndGet();
         synchronized (changeLock) {
             changeLock.notifyAll();
@@ -564,8 +651,28 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             endedTurn = -1;
             turnSeen = -1;
         }
+        if (game != seededForGame) {
+            final Thread acting = actingThread;
+            if (acting != null && acting != Thread.currentThread()) {
+                return; // an action is on its way to the host; the next change will try again
+            }
+            // First, since the seed replaces every setting the host holds for the seat.
+            if (!gui.seedStops()) {
+                return;
+            }
+            seededForGame = game;
+            lastYieldOnAt = System.currentTimeMillis();
+            try {
+                for (final Map.Entry<FPref, String> e : YIELD_SETTINGS.entrySet()) {
+                    c.setYieldPref(e.getKey(), e.getValue());
+                }
+            } catch (final RuntimeException e) {
+                System.err.println("[agent] could not send the yield settings: " + e);
+            }
+        }
         if (game != highlightsSentForGame) {
             highlightsSentForGame = game;
+            highlightsSentAt = System.currentTimeMillis();
             try {
                 // The host fills Selection.actionable only for a seat with this setting on.
                 c.setYieldPref(FPref.UI_SHOW_ACTIONABLE_HIGHLIGHTS, "true");
@@ -591,6 +698,14 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         } catch (final RuntimeException e) {
             System.err.println("[agent] could not send the auto-pass setting: " + e);
         }
+    }
+
+    /** Takes effect when the next game opens, since the stops are sent once per game. */
+    void setStops(final String mode) {
+        if (!AgentGuiGame.STOPS_DEFAULT.equals(mode) && !AgentGuiGame.STOPS_ALL.equals(mode)) {
+            throw new IllegalArgumentException("stops must be default or all");
+        }
+        gui.stops = mode;
     }
 
     void setAutoPass(final String mode) {
@@ -638,22 +753,63 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
      * Sends one controller call and returns once the host has reacted and gone quiet. The host runs each
      * call on its own thread, so two sent back to back can overlap there. Waiting spaces them like clicks.
      */
-    void act(final String action, final Integer id, final Integer color) throws InterruptedException {
+    boolean act(final String action, final Integer id, final Integer color, final Act opts) throws InterruptedException {
         synchronized (actLock) {
             // Let the host finish anything a just-sent "auto-pass on" started before we resume its game thread.
             final long clear = lastYieldOnAt + YIELD_ON_GAP_MILLIS - System.currentTimeMillis();
             if (clear > 0) {
                 Thread.sleep(clear);
             }
-            final long seen = revision.get();
+            if (opts.at() != null && opts.at() != gui.prompt.count()) {
+                return false;
+            }
+            long seen = revision.get();
             actingThread = Thread.currentThread();
             try {
-                send(action, id, color);
+                send(action, id, color, opts);
             } finally {
                 actingThread = null;
             }
             settle(seen);
+            final AgentGuiGame.Prompt pay = gui.prompt;
+            if (opts.autoPay() && !pay.waiting() && pay.okEnabled() && autoLabel().equals(pay.okLabel())) {
+                seen = revision.get();
+                controller().selectButtonOk();
+                settle(seen);
+            }
+            if (opts.pass() && ownItemOnTop()) {
+                seen = revision.get();
+                controller().sendYieldUpdate(new YieldUpdate.StackYield(gui.getCurrentPlayer(), true, true));
+                settle(seen);
+            }
+            return true;
         }
+    }
+
+    /**
+     * How an action is sent. {@code once}: OK passes priority one time, where it would yield until the stack
+     * is empty. {@code endTurn}: with OK, also yield until end of turn. {@code autoPay}: press Auto if the
+     * action leads to the prompt that pays a cost. {@code pass}: afterwards, pass priority if the seat's own
+     * spell or ability is on top of the stack. {@code at}: send only while this is the prompt count.
+     */
+    record Act(boolean once, boolean endTurn, boolean autoPay, boolean pass, Integer at) {
+        static final Act PLAIN = new Act(false, false, false, false, null);
+    }
+
+    private static String autoLabel() {
+        return Localizer.getInstance().getMessage("lblAuto");
+    }
+
+    /** True while the seat is offered priority and the top of the stack is its own spell or ability. */
+    private boolean ownItemOnTop() {
+        final GameView gv = gui.getGameView();
+        final PlayerView me = gui.getCurrentPlayer();
+        final AgentGuiGame.Prompt p = gui.prompt;
+        if (gv == null || me == null || p.waiting() || !p.okEnabled() || !p.message().startsWith(priorityPrefix())) {
+            return false;
+        }
+        final StackItemView top = gv.peekStack();
+        return top != null && top.getActivatingPlayer() != null && top.getActivatingPlayer().getId() == me.getId();
     }
 
     /** Waits for the host's first reaction after {@code seen}, then lets it settle: it sends several updates per action. */
@@ -670,21 +826,38 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
     }
 
-    private void send(final String action, final Integer id, final Integer color) {
+    private void send(final String action, final Integer id, final Integer color, final Act opts) {
         final IGameController c = controller();
         final GameView gv = gui.getGameView();
         final PlayerView me = gui.getCurrentPlayer();
-        // The two clicks that end our turn: End Turn, and OK in our end step with nothing on the stack.
+        final boolean yieldsTurn = "endTurn".equals(action) || ("ok".equals(action) && opts.endTurn());
+        if (yieldsTurn && me == null) {
+            throw new IllegalStateException("no game in progress");
+        }
+        // The clicks that end our turn: End Turn, and OK in our end step with nothing on the stack.
         int endsTurn = -1;
         if (gv != null && me != null && gv.getPlayerTurn() != null && gv.getPlayerTurn().getId() == me.getId()) {
-            final boolean endTurn = "cancel".equals(action) && endTurnLabel().equals(gui.prompt.cancelLabel());
+            final boolean endTurn = yieldsTurn || ("cancel".equals(action) && endTurnLabel().equals(gui.prompt.cancelLabel()));
             final boolean lastPass = "ok".equals(action) && gv.getPhase() == PhaseType.END_OF_TURN
                     && (gv.getStack() == null || gv.getStack().isEmpty());
             if (endTurn || lastPass) {
                 endsTurn = gv.getTurn();
             }
         }
-        sendAction(c, action, id, color);
+        final boolean priority = !gui.prompt.waiting() && gui.prompt.message().startsWith(priorityPrefix());
+        if (yieldsTurn) {
+            // What the End Turn button does, whatever the Cancel button reads. On the priority prompt the host
+            // passes when the yield arrives, and an OK after it would land on the next prompt.
+            c.sendYieldUpdate(new YieldUpdate.SetAutoPassUntilEndOfTurn(me, true));
+            if ("ok".equals(action) && !priority) {
+                c.selectButtonOk();
+            }
+        } else if ("ok".equals(action) && !opts.once() && ownItemOnTop()) {
+            // The host passes for the seat until the stack is empty, and stops when an opponent adds to it or attacks.
+            c.sendYieldUpdate(new YieldUpdate.StackYield(me, true, true));
+        } else {
+            sendAction(c, action, id, color);
+        }
         if (endsTurn >= 0) {
             // Auto-pass goes on after the click. Sent while our prompt is still up, it makes the host recompute
             // our actions on a network thread while the click resumes the game thread, and the host died with a

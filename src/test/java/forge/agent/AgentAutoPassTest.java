@@ -15,9 +15,10 @@ import com.google.gson.JsonObject;
 
 /**
  * Auto-pass on the opponent's turns. Both decks are 40 Forest, so the seat never has anything to do
- * on the host's turn. In the default mode the host passes for it there and no priority prompt
- * arrives before the end step, where the bridge switches auto-pass off again for the seat's own
- * turn. With the mode set to off the prompts come back. The seat's own main phase always asks.
+ * on the host's turn. In the default mode the host passes for it there. In the end step the bridge
+ * switches auto-pass off again for the seat's own turn, and answers the prompt that follows itself,
+ * since the host lists no card the seat could play. So the seat is asked nothing on the host's turn.
+ * With the mode set to off the prompts come back. The seat's own main phase always asks.
  */
 public class AgentAutoPassTest {
 
@@ -56,7 +57,7 @@ public class AgentAutoPassTest {
 
     /**
      * Plays to the end of a host turn that follows one of the seat's own, and returns the priority prompts
-     * the seat got on it before the end step, as "phase prompt".
+     * the seat got on it, as "phase prompt".
      */
     private List<String> hostTurn(final String mode) throws Exception {
         final List<String> asked = new ArrayList<>();
@@ -90,7 +91,7 @@ public class AgentAutoPassTest {
                 if (!ending && "opponent-turns".equals(mode)) {
                     assertTrue(g.get("autoPassNow").getAsBoolean(), "the host is passing for the seat in " + phase + ": " + g);
                 }
-                if (asks && !ending && g.get("promptCount").getAsInt() > lastPrompt) {
+                if (asks && g.get("promptCount").getAsInt() > lastPrompt) {
                     lastPrompt = g.get("promptCount").getAsInt();
                     asked.add("turn " + turn + " " + phase + ", prompt " + g.get("promptCount") + " after " + lastPrompt + ": " + g.get("prompt").getAsString());
                 }

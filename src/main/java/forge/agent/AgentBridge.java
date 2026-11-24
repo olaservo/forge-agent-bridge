@@ -49,6 +49,11 @@ public final class AgentBridge {
         session.setAutoPass(mode);
     }
 
+    /** default or all. */
+    void setStops(final String mode) {
+        session.setStops(mode);
+    }
+
     /** Sits down at each lobby that appears on the host named in {@code seat}, a {@code POST /sit} body. */
     void autoJoin(final JsonObject seat, final long intervalMillis) {
         final Thread t = new Thread(new AutoJoin(this, session, seat, intervalMillis), "Agent-AutoJoin");
@@ -183,9 +188,21 @@ public final class AgentBridge {
                 return session.gameSnapshot(true);
             case "GET /game/log":
                 return Map.of("log", session.gameLog(Integer.parseInt(q.getOrDefault("since", "0"))));
-            case "POST /game/act":
-                session.act(str(body, "action", null), optInt(body, "id"), optInt(body, "color"));
-                return session.gameSnapshot(false);
+            case "POST /game/act": {
+                final String pay = optStr(body, "pay");
+                if (pay != null && !"auto".equals(pay)) {
+                    throw new IllegalArgumentException("pay must be auto");
+                }
+                final AgentSession.Act opts = new AgentSession.Act(flag(body, "once"), flag(body, "endTurn"), pay != null,
+                        flag(body, "pass"), optInt(body, "at"));
+                final boolean sent = session.act(str(body, "action", null), optInt(body, "id"), optInt(body, "color"), opts);
+                final Map<String, Object> game = session.gameSnapshot(false);
+                if (!sent) {
+                    // The prompt the caller answered is no longer the one up. Nothing was sent.
+                    game.put("stale", true);
+                }
+                return game;
+            }
             case "POST /game/yield":
                 session.setAutoPass(str(body, "autoPass", null));
                 return session.gameSnapshot(false);
@@ -281,6 +298,10 @@ public final class AgentBridge {
 
     private static String optStr(final JsonObject o, final String key) {
         return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
+    }
+
+    private static boolean flag(final JsonObject o, final String key) {
+        return o.has(key) && !o.get(key).isJsonNull() && o.get(key).getAsBoolean();
     }
 
     private static Integer optInt(final JsonObject o, final String key) {
