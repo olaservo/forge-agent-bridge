@@ -19,12 +19,14 @@ import com.google.gson.JsonObject;
  * host AI plays Goblin Brigand, a 2/2 that attacks each combat if able. The seat is asked at every stop.
  *
  * The attack prompt: Forge shows it twice when it starts, and the count goes up once. The host showing it
- * again keeps the count, and an action with that count as {@code at} is sent. The prompt the host shows
- * after that click counts, and so does a priority prompt shown again.
+ * again keeps the count, and an action with that count as {@code at} is sent. A click on a Forest is
+ * answered with {@code unchanged}, and a click on a creature that can attack is not. The prompt the host
+ * shows after that click counts, and so does a priority prompt shown again.
  *
  * The first attack on the seat is not blocked: {@code blocksFinal} is false at the block prompt and true
- * after OK, with {@code blocked} false. In a later attack a blocker is planned with {@code blocksFinal}
- * false, and after OK the attacker is {@code blocked} with {@code blocksFinal} true.
+ * after OK, with {@code blocked} false. In a later attack a click on a Forest is answered with
+ * {@code unchanged}, a blocker is planned with {@code blocksFinal} false, and after OK the attacker is
+ * {@code blocked} with {@code blocksFinal} true.
  */
 public class AgentCombatSignalsTest {
 
@@ -94,8 +96,13 @@ public class AgentCombatSignalsTest {
                 AgentGameTest.waitFor("the bridge has the prompt the host showed again", 5_000, () -> revision() > revision);
                 assertEquals(match.http.get("/game").get("promptCount").getAsInt(), count, "the same prompt shown again keeps its count");
 
+                final JsonObject miss = match.http.post("/game/act", BridgeHttp.body("action", "selectCard", "id", land(me), "at", count));
+                assertFalse(miss.has("stale"), "an action for the prompt that is up is sent: " + miss);
+                assertTrue(miss.has("unchanged") && miss.get("unchanged").getAsBoolean(), "a land cannot attack, and the answer says nothing changed: " + miss);
+                match.http.record("POST /game/act#unchanged", miss);
                 final JsonObject hit = match.http.post("/game/act", BridgeHttp.body("action", "selectCard", "id", attacker(me), "at", count));
-                assertFalse(hit.has("stale"), "an action for the prompt that is up is sent: " + hit);
+                assertFalse(hit.has("stale"), "the ignored click did not move the count: " + hit);
+                assertFalse(hit.has("unchanged"), "a creature that can attack was declared: " + hit);
                 assertTrue(hit.get("promptCount").getAsInt() > count, "the prompt the host shows after a click counts: " + hit);
                 match.act("ok", null);
                 attackPrompt = true;
@@ -123,7 +130,10 @@ public class AgentCombatSignalsTest {
                 final int attacker = g.getAsJsonArray("combat").get(0).getAsJsonObject().get("attackerId").getAsInt();
                 final int blocker = RiggedMatch.card(me, "battlefield", CREATURE).get("id").getAsInt();
                 match.act("selectCard", attacker);
-                match.act("selectCard", blocker);
+                final JsonObject miss = match.act("selectCard", land(me));
+                assertTrue(miss.has("unchanged") && miss.get("unchanged").getAsBoolean(), "a land cannot block, and the answer says nothing changed: " + miss);
+                final JsonObject hit = match.act("selectCard", blocker);
+                assertFalse(hit.has("unchanged"), "a creature that can block was planned as a blocker: " + hit);
                 final JsonObject mid = match.http.get("/game");
                 match.http.record("GET /game#plannedBlock", mid);
                 final JsonObject planned = entry(mid, attacker);
@@ -168,6 +178,15 @@ public class AgentCombatSignalsTest {
             }
         }
         throw new AssertionError("attacker " + attacker + " is not in combat: " + g.get("combat"));
+    }
+
+    private static Integer land(final JsonObject me) {
+        for (final JsonElement c : me.getAsJsonArray("battlefield")) {
+            if (LAND.equals(c.getAsJsonObject().get("name").getAsString())) {
+                return c.getAsJsonObject().get("id").getAsInt();
+            }
+        }
+        throw new AssertionError("no " + LAND + " on the battlefield");
     }
 
     /** A creature of the seat's that can attack, or null. */

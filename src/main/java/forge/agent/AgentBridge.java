@@ -197,11 +197,14 @@ public final class AgentBridge {
                 }
                 final AgentSession.Act opts = new AgentSession.Act(flag(body, "once"), flag(body, "endTurn"), pay != null,
                         flag(body, "pass"), optInt(body, "at"));
-                final boolean sent = session.act(str(body, "action", null), optInt(body, "id"), optInt(body, "color"), opts);
+                final AgentSession.Acted acted = session.act(str(body, "action", null), optInt(body, "id"), optInt(body, "color"), opts);
                 final Map<String, Object> game = session.gameSnapshot(false);
-                if (!sent) {
+                if (acted == AgentSession.Acted.STALE) {
                     // The prompt the caller answered is no longer the one up. Nothing was sent.
                     game.put("stale", true);
+                } else if (acted == AgentSession.Acted.UNCHANGED) {
+                    // The click was sent and nothing in GET /game differs from before it.
+                    game.put("unchanged", true);
                 }
                 return game;
             }
