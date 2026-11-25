@@ -61,7 +61,14 @@ A Forge client tells the host where its player wants to stop, and the host passe
 - `default`: Forge's desktop defaults. On the seat's own turn it is asked in main 1, after blockers are declared, and in main 2. On an opponent's turn it is asked at beginning of combat, after attackers are declared, after blockers are declared, and in the end step. Auto-pass above removes those when the seat has nothing to play.
 - `all`: every phase, as the bridge did up to 0.1.9. Start with `--stops all`.
 
-The game summary reports `stops`. A phase with something on the stack is always asked, and so are declaring attackers and blockers and answering choices.
+The game summary reports `stops` as `default`, `all` or `custom`. A phase with something on the stack is always asked, and so are declaring attackers and blockers and answering choices.
+
+A seat changes its stops with `POST /game/stops {"own": [...], "opponent": [...]}`, as a player does by clicking a phase label on the desktop. Each list is the whole set of steps for the seat's own turn or for an opponent's, by the names `phase` has in the game summary (`UPKEEP`, `DRAW`, `MAIN1`, `COMBAT_BEGIN`, `COMBAT_DECLARE_ATTACKERS`, `COMBAT_DECLARE_BLOCKERS`, `COMBAT_FIRST_STRIKE_DAMAGE`, `COMBAT_DAMAGE`, `COMBAT_END`, `MAIN2`, `END_OF_TURN`, `CLEANUP`). A list left out stays as it is. `GET /game/stops` and the answer to the POST give `stops`, `own` and `opponent`.
+
+- In a game each change goes to the host at once. If the seat has a priority prompt up, with an empty stack, in a step that is no longer a stop, the host passes that prompt, as it does on the desktop.
+- `own` must include `MAIN1`. Without it the seat is not asked in its first main phase and cannot play a land.
+- The sets stay for later games in the same bridge process.
+- `AgentStopsTest` removes two stops on the host's turn, keeps one, and adds the seat's own upkeep.
 
 `POST /game/act` uses Forge's yields in three places:
 
@@ -114,7 +121,7 @@ All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
 - `POST /chat {text}`. `chat` in the status holds the last 20 lines as `{from, text}`, with `from` null for a line from the host itself, and `chatCount` counts them all.
 - `GET /draft/pack`, `POST /draft/pick {card}`, `GET /draft/pool`. `packNumber` and `pickNumber` count from 1. `secondsLeft` is sent while a pick is waiting and the host set a pick clock. The pool of a sealed event arrives the same way, with no packs before it.
 - `POST /draft/deck {main, lands, landSet}`: builds the deck for the match from the pool, sends it to the host and saves it over the pool file, as the desktop's deck editor does. `main` lists pool card names, one entry per copy. `lands` maps basic land names to counts. `landSet` is the set code for the lands and defaults to the set most of the pool comes from. Cards left in the pool become the sideboard. `problem` is null when the deck is legal for Limited. `lobby.myDeck` in the status then shows the deck's name and sizes, because the host does not send a seat's deck back.
-- `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}` or `{id, amounts}`, `POST /game/yield {autoPass}`
+- `GET /game`, `GET /game/log?since=<n>`, `POST /game/act {action, id, color}`, `POST /game/decide {id, choices, text}` or `{id, amounts}`, `POST /game/yield {autoPass}`, `GET /game/stops`, `POST /game/stops {own, opponent}`
 - `POST /game/act` also takes `once`, `endTurn` and `pass` (see Stops and yields), `"pay": "auto"`, which presses Auto when the action leads to the prompt that pays a cost, and `at`, a `promptCount`. When `at` is not the current count the action is not sent and the answer has `stale: true`.
 - `messageCount` counts the game's `messages` and `logCount` the lines of the game log, so a caller can ask for what is new. In `GET /game` each player has `mana`, the mana floating in its pool by colour letter (`W`, `U`, `B`, `R`, `G`, `C`), and each stack item has `targets`, cards as `name#id`, players by name, and another stack item by the name of its source. `stack` is listed from the top down.
 

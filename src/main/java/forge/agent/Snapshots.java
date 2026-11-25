@@ -260,7 +260,7 @@ final class Snapshots {
         m.put("hasPriority", me == null ? null : !over && !waiting && me.getHasPriority());
         m.put("autoPass", autoPass.mode());
         m.put("autoPassNow", autoPass.now());
-        m.put("stops", gui.stops);
+        m.put("stops", gui.stops());
         if (!full) {
             return m;
         }

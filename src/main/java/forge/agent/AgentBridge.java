@@ -9,6 +9,7 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 import forge.deck.Deck;
+import forge.game.phase.PhaseType;
 import forge.deck.io.DeckSerializer;
 import forge.model.FModel;
 
@@ -203,6 +205,10 @@ public final class AgentBridge {
                 }
                 return game;
             }
+            case "GET /game/stops":
+                return session.stopsSnapshot();
+            case "POST /game/stops":
+                return session.setStops(phases(body, "own"), phases(body, "opponent"));
             case "POST /game/yield":
                 session.setAutoPass(str(body, "autoPass", null));
                 return session.gameSnapshot(false);
@@ -298,6 +304,25 @@ public final class AgentBridge {
 
     private static String optStr(final JsonObject o, final String key) {
         return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
+    }
+
+    /** A list of phases by Forge's own names, as `phase` has them in a game answer. Null when the key is absent. */
+    private static Set<PhaseType> phases(final JsonObject o, final String key) {
+        if (!o.has(key) || o.get(key).isJsonNull()) {
+            return null;
+        }
+        if (!o.get(key).isJsonArray()) {
+            throw new IllegalArgumentException("'" + key + "' must be a list of phase names");
+        }
+        final Set<PhaseType> set = EnumSet.noneOf(PhaseType.class);
+        for (final JsonElement e : o.getAsJsonArray(key)) {
+            try {
+                set.add(PhaseType.valueOf(e.getAsString()));
+            } catch (final IllegalArgumentException unknown) {
+                throw new IllegalArgumentException("unknown phase '" + e.getAsString() + "'. The phases are " + AgentGuiGame.STOPPABLE);
+            }
+        }
+        return set;
     }
 
     private static boolean flag(final JsonObject o, final String key) {

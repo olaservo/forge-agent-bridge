@@ -1,6 +1,7 @@
 package forge.agent;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -68,13 +69,29 @@ final class AgentGuiGame extends NetworkGuiGame {
 
     volatile Prompt prompt = new Prompt("", null, 0, false, "OK", "Cancel", false, false);
 
-    /** Where the host stops for the seat on an empty stack: Forge's desktop defaults, or every phase. */
+    /** Names for the two sets of stops the bridge starts with: Forge's desktop defaults, or every phase. */
     static final String STOPS_DEFAULT = "default";
     static final String STOPS_ALL = "all";
-    private static final Set<PhaseType> OWN_STOPS = EnumSet.of(PhaseType.MAIN1, PhaseType.COMBAT_DECLARE_BLOCKERS, PhaseType.MAIN2);
-    private static final Set<PhaseType> OPPONENT_STOPS = EnumSet.of(PhaseType.COMBAT_BEGIN, PhaseType.COMBAT_DECLARE_ATTACKERS,
-            PhaseType.COMBAT_DECLARE_BLOCKERS, PhaseType.END_OF_TURN);
-    volatile String stops = STOPS_DEFAULT;
+    static final String STOPS_CUSTOM = "custom";
+    /** The phases with a label on Forge's desktop, where a player sets a stop. The untap step has none. */
+    static final Set<PhaseType> STOPPABLE = Collections.unmodifiableSet(EnumSet.complementOf(EnumSet.of(PhaseType.UNTAP)));
+    static final Set<PhaseType> OWN_STOPS = Collections.unmodifiableSet(
+            EnumSet.of(PhaseType.MAIN1, PhaseType.COMBAT_DECLARE_BLOCKERS, PhaseType.MAIN2));
+    static final Set<PhaseType> OPPONENT_STOPS = Collections.unmodifiableSet(EnumSet.of(PhaseType.COMBAT_BEGIN,
+            PhaseType.COMBAT_DECLARE_ATTACKERS, PhaseType.COMBAT_DECLARE_BLOCKERS, PhaseType.END_OF_TURN));
+    /** Where the host stops for the seat on an empty stack, in its own turn and in an opponent's. Replaced whole. */
+    volatile Set<PhaseType> ownStops = OWN_STOPS;
+    volatile Set<PhaseType> opponentStops = OPPONENT_STOPS;
+
+    /** {@code default}, {@code all} or {@code custom}. */
+    String stops() {
+        final Set<PhaseType> own = ownStops;
+        final Set<PhaseType> opponent = opponentStops;
+        if (own.equals(OWN_STOPS) && opponent.equals(OPPONENT_STOPS)) {
+            return STOPS_DEFAULT;
+        }
+        return own.equals(STOPPABLE) && opponent.equals(STOPPABLE) ? STOPS_ALL : STOPS_CUSTOM;
+    }
 
     /** How long the bridge may take to answer a prompt for the seat before the seat is asked after all. */
     private static final long ANSWER_MS = 2500;
@@ -629,10 +646,10 @@ final class AgentGuiGame extends NetworkGuiGame {
     @Override
     public boolean isUiSetToSkipPhase(final PlayerView playerTurn, final PhaseType phase) {
         final PlayerView me = getCurrentPlayer();
-        if (STOPS_ALL.equals(stops) || playerTurn == null || phase == null || phase == PhaseType.UNTAP || me == null) {
+        if (playerTurn == null || phase == null || phase == PhaseType.UNTAP || me == null) {
             return false;
         }
-        return !(me.getId() == playerTurn.getId() ? OWN_STOPS : OPPONENT_STOPS).contains(phase);
+        return !(me.getId() == playerTurn.getId() ? ownStops : opponentStops).contains(phase);
     }
 
     /**

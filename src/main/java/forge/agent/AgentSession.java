@@ -2,9 +2,13 @@ package forge.agent;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -700,12 +704,81 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
     }
 
-    /** Takes effect when the next game opens, since the stops are sent once per game. */
+    /** The stops the bridge starts with. */
     void setStops(final String mode) {
-        if (!AgentGuiGame.STOPS_DEFAULT.equals(mode) && !AgentGuiGame.STOPS_ALL.equals(mode)) {
+        if (AgentGuiGame.STOPS_ALL.equals(mode)) {
+            gui.ownStops = AgentGuiGame.STOPPABLE;
+            gui.opponentStops = AgentGuiGame.STOPPABLE;
+        } else if (AgentGuiGame.STOPS_DEFAULT.equals(mode)) {
+            gui.ownStops = AgentGuiGame.OWN_STOPS;
+            gui.opponentStops = AgentGuiGame.OPPONENT_STOPS;
+        } else {
             throw new IllegalArgumentException("stops must be default or all");
         }
-        gui.stops = mode;
+    }
+
+    /**
+     * Sets where the host stops for the seat on an empty stack. A null set is left as it is. In a game each
+     * change goes to the host as the desktop sends a click on a phase label, and the host then passes a
+     * priority prompt the seat has up in a step that is no longer a stop. The sets stay for later games.
+     */
+    Map<String, Object> setStops(final Set<PhaseType> own, final Set<PhaseType> opponent) throws InterruptedException {
+        for (final Set<PhaseType> set : Arrays.asList(own, opponent)) {
+            if (set != null && !AgentGuiGame.STOPPABLE.containsAll(set)) {
+                throw new IllegalArgumentException("UNTAP is not a stop: no player gets priority there");
+            }
+        }
+        if (own != null && !own.contains(PhaseType.MAIN1)) {
+            throw new IllegalArgumentException("own needs MAIN1: without it the seat is not asked in its first main phase "
+                    + "and cannot play a land or cast a spell before combat");
+        }
+        synchronized (actLock) {
+            final Set<PhaseType> ownBefore = gui.ownStops;
+            final Set<PhaseType> opponentBefore = gui.opponentStops;
+            if (own != null) {
+                gui.ownStops = Collections.unmodifiableSet(EnumSet.copyOf(own));
+            }
+            if (opponent != null) {
+                gui.opponentStops = Collections.unmodifiableSet(opponent.isEmpty() ? EnumSet.noneOf(PhaseType.class) : EnumSet.copyOf(opponent));
+            }
+            final GameView gv = gui.getGameView();
+            final PlayerView me = gui.getCurrentPlayer();
+            final IGameController c = gui.getGameController();
+            // Before the seed the host has nothing to change, and the seed carries the new sets.
+            if (gv != null && gv.getPlayers() != null && me != null && c != null && seededForGame == gui.gamesOpened && !gui.gameFinished) {
+                final long seen = revision.get();
+                for (final PlayerView p : gv.getPlayers()) {
+                    final boolean mine = p.getId() == me.getId();
+                    final Set<PhaseType> before = mine ? ownBefore : opponentBefore;
+                    final Set<PhaseType> now = mine ? gui.ownStops : gui.opponentStops;
+                    for (final PhaseType phase : AgentGuiGame.STOPPABLE) {
+                        if (before.contains(phase) != now.contains(phase)) {
+                            c.sendYieldUpdate(new YieldUpdate.SkipPhase(p, phase, !now.contains(phase)));
+                        }
+                    }
+                }
+                settle(seen);
+            }
+        }
+        return stopsSnapshot();
+    }
+
+    Map<String, Object> stopsSnapshot() {
+        final Map<String, Object> m = new LinkedHashMap<>();
+        m.put("stops", gui.stops());
+        m.put("own", phaseNames(gui.ownStops));
+        m.put("opponent", phaseNames(gui.opponentStops));
+        return m;
+    }
+
+    private static List<String> phaseNames(final Set<PhaseType> set) {
+        final List<String> names = new ArrayList<>();
+        for (final PhaseType phase : PhaseType.values()) {
+            if (set.contains(phase)) {
+                names.add(phase.name());
+            }
+        }
+        return names;
     }
 
     void setAutoPass(final String mode) {
