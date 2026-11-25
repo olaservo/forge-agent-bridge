@@ -17,6 +17,7 @@ import com.google.gson.JsonObject;
 import forge.deck.Deck;
 import forge.deck.DeckgenUtil;
 import forge.deck.io.DeckSerializer;
+import forge.game.ability.AbilityKey;
 import forge.game.card.Card;
 import forge.game.player.Player;
 import forge.game.zone.ZoneType;
@@ -334,6 +335,34 @@ final class RiggedMatch {
 
     Card hostCard(final String player, final ZoneType zone) {
         return hostPlayer(player).getCardsIn(zone).getFirst();
+    }
+
+    /** Cards of that name in a player's zone, read from the host. */
+    int hostCount(final String player, final ZoneType zone, final String name) {
+        int n = 0;
+        for (final Card c : hostPlayer(player).getCardsIn(zone)) {
+            if (name.equals(c.getName())) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * Moves a card of that name from a player's library, or else its hand, onto the battlefield, in the host's
+     * game. Only while {@link #hostWaitsOnSeat} is true: the host's game does not move then.
+     */
+    void hostPuts(final String player, final String name) {
+        final Player p = hostPlayer(player);
+        for (final ZoneType zone : List.of(ZoneType.Library, ZoneType.Hand)) {
+            for (final Card c : p.getCardsIn(zone)) {
+                if (name.equals(c.getName())) {
+                    p.getGame().getAction().moveToPlay(c, p, null, AbilityKey.newMap());
+                    return;
+                }
+            }
+        }
+        throw new IllegalStateException("no " + name + " in the library or hand of " + player);
     }
 
     int hostLife(final String player) {
