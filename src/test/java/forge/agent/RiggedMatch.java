@@ -266,6 +266,16 @@ final class RiggedMatch {
         server.findClientByIndex(1).getGui().showPromptMessage(null, message);
     }
 
+    /** Has the host tell the agent's seat that its input ended, as it does before the seat reads "Waiting for ...". */
+    void hostAwaitsNextInput() {
+        server.findClientByIndex(1).getGui().awaitNextInput();
+    }
+
+    /** Has the host send the agent's seat its buttons with neither enabled, as an input that needs a target does. */
+    void hostDisablesButtons() {
+        server.findClientByIndex(1).getGui().updateButtons(null, false, false, false);
+    }
+
     /** Has the host send the agent its whole game view again, as it does when the agent reports a checksum mismatch. */
     void resync() {
         server.findClientByIndex(1).getGui().setResyncPending();
