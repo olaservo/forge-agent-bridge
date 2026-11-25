@@ -861,6 +861,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             if (opts.at() != null && opts.at() != gui.prompt.count()) {
                 return false;
             }
+            // The stack before the action, to tell whether the action added to it.
+            final StackItemView topBefore = top();
+            final int sizeBefore = stackSize();
             long seen = revision.get();
             actingThread = Thread.currentThread();
             try {
@@ -878,8 +881,11 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             final boolean click = !"ok".equals(action) && !"endTurn".equals(action);
             if ((click && opts.endTurn()) || opts.pass()) {
                 seen = revision.get();
-                if (!ownItemOnTop()) {
-                    // Nothing to pass: the action led to another prompt, or an opponent's item is on top.
+                final StackItemView top = top();
+                if (!ownItemOnTop() || stackSize() <= sizeBefore || (topBefore != null && top.getId() == topBefore.getId())) {
+                    // Nothing to pass: the action led to another prompt, an opponent's item is on top, or the
+                    // action put nothing on the stack. An item that was there before the action is not passed,
+                    // so a card the host refused resolves nothing and does not end the turn.
                 } else if (!onlyOwnItemsOnStack()) {
                     // An opponent's item is under the seat's. One pass, and the seat is asked again about theirs.
                     controller().selectButtonOk();
@@ -927,6 +933,16 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
         final StackItemView top = gv.peekStack();
         return top != null && top.getActivatingPlayer() != null && top.getActivatingPlayer().getId() == me.getId();
+    }
+
+    private StackItemView top() {
+        final GameView gv = gui.getGameView();
+        return gv == null ? null : gv.peekStack();
+    }
+
+    private int stackSize() {
+        final GameView gv = gui.getGameView();
+        return gv == null || gv.getStack() == null ? 0 : gv.getStack().size();
     }
 
     /**
