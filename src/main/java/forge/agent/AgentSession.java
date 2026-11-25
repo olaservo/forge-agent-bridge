@@ -852,6 +852,12 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
      * call on its own thread, so two sent back to back can overlap there. Waiting spaces them like clicks.
      */
     boolean act(final String action, final Integer id, final Integer color, final Act opts) throws InterruptedException {
+        if (id == null && ("selectCard".equals(action) || "selectPlayer".equals(action) || "selectStack".equals(action))) {
+            throw new IllegalArgumentException(action + " needs an id. Nothing was sent.");
+        }
+        if (color == null && "useMana".equals(action)) {
+            throw new IllegalArgumentException("useMana needs a color. Nothing was sent.");
+        }
         synchronized (actLock) {
             // Let the host finish anything a just-sent "auto-pass on" started before we resume its game thread.
             final long clear = lastYieldOnAt + YIELD_ON_GAP_MILLIS - System.currentTimeMillis();
@@ -873,7 +879,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             }
             settle(seen);
             final AgentGuiGame.Prompt pay = gui.prompt;
-            if (opts.autoPay() && !pay.waiting() && pay.okEnabled() && autoLabel().equals(pay.okLabel())) {
+            // Not with a decision open, such as a choice of abilities the click brought up: the seat answers that first.
+            if (opts.autoPay() && !deciding() && !pay.waiting() && pay.okEnabled() && autoLabel().equals(pay.okLabel())) {
                 seen = revision.get();
                 controller().selectButtonOk();
                 settle(seen);
@@ -882,8 +889,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             if ((click && opts.endTurn()) || opts.pass()) {
                 seen = revision.get();
                 final StackItemView top = top();
-                if (!ownItemOnTop() || stackSize() <= sizeBefore || (topBefore != null && top.getId() == topBefore.getId())) {
-                    // Nothing to pass: the action led to another prompt, an opponent's item is on top, or the
+                if (deciding() || !ownItemOnTop() || stackSize() <= sizeBefore || (topBefore != null && top.getId() == topBefore.getId())) {
+                    // Nothing to pass: the action led to a decision or another prompt, an opponent's item is on top, or the
                     // action put nothing on the stack. An item that was there before the action is not passed,
                     // so a card the host refused resolves nothing and does not end the turn.
                 } else if (!onlyOwnItemsOnStack()) {
@@ -933,6 +940,12 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
         final StackItemView top = gv.peekStack();
         return top != null && top.getActivatingPlayer() != null && top.getActivatingPlayer().getId() == me.getId();
+    }
+
+    /** True while a decision waits for the seat's answer. */
+    private boolean deciding() {
+        final PendingDecision d = gui.pending;
+        return d != null && !d.isAnswered();
     }
 
     private StackItemView top() {
