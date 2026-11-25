@@ -291,8 +291,15 @@ final class Snapshots {
             pm.put("mana", mana);
             pm.put("battlefield", cards(gui, p.getBattlefield()));
             pm.put("graveyard", cards(gui, p.getGraveyard()));
-            if (me != null && me.getId() == p.getId()) {
+            if (isMe) {
                 pm.put("hand", cards(gui, p.getHand()));
+                // The top card of the seat's library while an effect lets the player look at it. The host sends
+                // every library's cards, top first, and Forge's client shows one only where canBeShownTo allows.
+                final FCollectionView<CardView> library = p.getLibrary();
+                final CardView top = library.isEmpty() ? null : library.get(0);
+                if (top != null && top.getZone() == ZoneType.Library && top.getController() != null && top.canBeShownTo(me)) {
+                    pm.put("libraryTop", describe(gui, top));
+                }
             }
             players.add(pm);
         }
