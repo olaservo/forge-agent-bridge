@@ -88,6 +88,71 @@ public class AgentHostedMatchTest {
         endMatch(first, second);
     }
 
+    /**
+     * A second match in the same lobby is game 1 of its match, as the first was. {@code gamesOpened} tells
+     * them apart. The first seat's game state is recorded at the opening hand and the end of the first match,
+     * back in the lobby, and at the opening hand of the second.
+     */
+    @Test(timeOut = 300_000)
+    public void theSecondMatchOpensAsAnotherGame() throws Exception {
+        host(true);
+        final BridgeHttp first = seat();
+        final BridgeHttp second = seat();
+        try {
+            first.post("/sit", BridgeHttp.body("port", hostPort, "name", "FirstBot", "dck", DECK));
+            second.post("/sit", BridgeHttp.body("port", hostPort, "name", "SecondBot", "dck", DECK));
+            inGame(first, second);
+            openingHands(first, second);
+            final JsonObject one = first.get("/game");
+            first.record("GET /game#firstMatch", one);
+            first.record("GET /status#firstMatch", first.get("/status"));
+
+            first.post("/game/act", BridgeHttp.body("action", "concede", "id", null));
+            for (final BridgeHttp seat : List.of(first, second)) {
+                AgentGameTest.waitFor("the game ends on the concession", 30_000, () -> {
+                    final JsonObject g = seat.get("/game");
+                    return g.get("gameOver").getAsBoolean() && g.get("finished").getAsBoolean();
+                });
+            }
+            first.record("GET /game#firstMatchOver", first.get("/game"));
+            first.record("GET /status#firstMatchOver", first.get("/status"));
+            first.post("/game/act", BridgeHttp.body("action", "quit", "id", null));
+            second.post("/game/act", BridgeHttp.body("action", "quit", "id", null));
+            AgentGameTest.waitFor("the host ends the match", 30_000, () -> lobby.getHostedMatch() == null);
+            Thread.sleep(1_000);
+            first.record("GET /game#betweenMatches", first.get("/game"));
+
+            first.post("/lobby/ready", BridgeHttp.body("ready", true));
+            second.post("/lobby/ready", BridgeHttp.body("ready", true));
+            inGame(first, second);
+            openingHands(first, second);
+            final JsonObject two = first.get("/game");
+            first.record("GET /game#secondMatch", two);
+            first.record("GET /status#secondMatch", first.get("/status"));
+            first.record("GET /game/log#secondMatch", first.get("/game/log"));
+            assertEquals(one.getAsJsonObject("match").get("game").getAsInt(), 1, "the first match opens with its game 1");
+            assertEquals(two.getAsJsonObject("match").get("game").getAsInt(), 1, "the second match opens with its game 1");
+            assertTrue(two.get("gamesOpened").getAsInt() > one.get("gamesOpened").getAsInt(),
+                    "the second match is another game: " + one.get("gamesOpened") + " then " + two.get("gamesOpened"));
+            endMatch(first, second);
+        } finally {
+            first.saveFixtures("rematch");
+        }
+    }
+
+    /** The seat that is asked chooses to play, and both seats draw their seven cards. */
+    private static void openingHands(final BridgeHttp... seats) throws Exception {
+        for (final BridgeHttp seat : seats) {
+            final JsonObject g = seat.get("/game");
+            if (!g.get("waiting").getAsBoolean() && g.get("prompt").getAsString().contains("play or draw")) {
+                seat.post("/game/act", BridgeHttp.body("action", "ok", "id", null));
+            }
+        }
+        for (final BridgeHttp seat : seats) {
+            AgentGameTest.waitFor("a seat has its opening hand", 30_000, () -> RiggedMatch.me(seat.get("/game")).getAsJsonArray("hand").size() == 7);
+        }
+    }
+
     @Test(timeOut = 300_000)
     public void aDeckTheLobbyRefusesIsNamedInChat() throws Exception {
         host(false);
