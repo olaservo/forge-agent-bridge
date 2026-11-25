@@ -184,6 +184,9 @@ public class AgentDraftTest {
                 assertNotNull(picked.getAsJsonObject("picked").get("name"));
                 assertFalse(picked.has("stale"), "a pick from the waiting pack is made: " + picked);
                 picks++;
+                // The pick is in the list once the host has said the seat picked.
+                final int made = picks;
+                waitFor("the host confirms pick " + made, 5_000, () -> http.get("/status").getAsJsonObject("draft").getAsJsonArray("picks").size() == made);
             }
         }
 

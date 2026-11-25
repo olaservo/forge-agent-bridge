@@ -91,6 +91,13 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private volatile Deck lobbyDeck;
     final List<String> picks = new CopyOnWriteArrayList<>();
     final List<String> autoPicks = new CopyOnWriteArrayList<>();
+    /**
+     * The pick sent to the host and not yet in {@link #picks}. The host tells every client when a seat has picked,
+     * and drops a pick whose card is not in the seat's pack without a word. Under {@code draftLock}.
+     */
+    private String sentPick;
+    /** The host picked for the seat, and its notice that the seat has picked is still to come. Under {@code draftLock}. */
+    private boolean autoPickEcho;
 
     /**
      * When the host passes priority for our seat because it has no available actions. Forge's check misses
@@ -450,6 +457,15 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     @Override
     public void draftSeatPicked(final int seat, final int[] queueDepths) {
         synchronized (draftLock) {
+            if (seat == draft.seatIndex()) {
+                // The host sends its own pick for the seat first, then this notice for it.
+                if (autoPickEcho) {
+                    autoPickEcho = false;
+                } else if (sentPick != null) {
+                    picks.add(sentPick);
+                    sentPick = null;
+                }
+            }
             draft = draft.queueDepths(queueDepths);
         }
         changed();
@@ -458,8 +474,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     @Override
     public void draftAutoPicked(final int seat, final PaperCard card, final int packNo, final int pickInPack) {
         autoPicks.add(card.getName() + " (pack " + packNo + " pick " + pickInPack + ")");
-        picks.add(card.getName());
         synchronized (draftLock) {
+            picks.add(card.getName());
+            autoPickEcho = true;
             draft = draft.picked();
         }
         changed();
@@ -490,6 +507,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private void startEvent() {
         picks.clear();
         autoPicks.clear();
+        sentPick = null;
+        autoPickEcho = false;
     }
 
     /**
@@ -600,7 +619,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             }
             chosen = found;
             requireClient().send(new DraftPickEvent(d.seatIndex(), chosen));
-            picks.add(chosen.getName());
+            // It joins the picks when the host says the seat has picked.
+            sentPick = chosen.getName();
             draft = d.picked();
         }
         changed();
