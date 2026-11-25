@@ -119,6 +119,8 @@ final class AgentGuiGame extends NetworkGuiGame {
     /** The count of a prompt kept back for its selection, and of one shown without it when the wait ran out. Agent-EDT only. */
     private int held = -1;
     private int released = -1;
+    /** True while a prompt is kept back, for the threads that send actions. */
+    private volatile boolean holding;
     private boolean batching;
     volatile boolean gameFinished;
     volatile int incorrectActions;
@@ -162,6 +164,7 @@ final class AgentGuiGame extends NetworkGuiGame {
             return;
         }
         if (awaitsSelection()) {
+            holding = true;
             if (held != next.count) {
                 held = next.count;
                 final int count = next.count;
@@ -176,7 +179,19 @@ final class AgentGuiGame extends NetworkGuiGame {
         }
         held = -1;
         prompt = next;
+        holding = false;
         changed();
+    }
+
+    /**
+     * Waits while a prompt is kept back for its selection. The host has that prompt up, and the seat reads the
+     * one before it, so an action checked now would be checked against the wrong prompt.
+     */
+    void awaitHeldPrompt() throws InterruptedException {
+        final long deadline = System.currentTimeMillis() + 2 * SELECTION_WAIT_MS;
+        while (holding && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+        }
     }
 
     /**
@@ -601,9 +616,10 @@ final class AgentGuiGame extends NetworkGuiGame {
      * seat is being asked (OK is enabled) and the bridge has sent no click or answer since it arrived: only
      * the seat's own click ends or changes an input the host waits on. The priority prompt always counts,
      * because the host can pass it for the seat: on a yield or stop sent earlier, or when its timer runs out.
+     * A prompt kept back for its selection is not up yet, so nothing is the same prompt as it.
      */
     private boolean shownAgain(final String message, final CardView card) {
-        return !next.waiting && next.okEnabled && sends.get() == sendsAtPrompt && message.equals(next.message)
+        return next == prompt && !next.waiting && next.okEnabled && sends.get() == sendsAtPrompt && message.equals(next.message)
                 && Objects.equals(card, next.card) && !message.startsWith(AgentSession.priorityPrefix());
     }
 

@@ -880,6 +880,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             if (clear > 0) {
                 Thread.sleep(clear);
             }
+            // A prompt kept back for its selection is the one the host has up: the action is checked against it.
+            gui.awaitHeldPrompt();
             if (opts.at() != null && opts.at() != gui.prompt.count()) {
                 return Acted.STALE;
             }
@@ -931,6 +933,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
                 }
                 settle(seen);
             }
+            // The answer is read after this: a prompt the action brought up is in it.
+            gui.awaitHeldPrompt();
             return before != null && before.equals(view()) ? Acted.UNCHANGED : Acted.SENT;
         }
     }

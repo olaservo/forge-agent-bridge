@@ -93,6 +93,14 @@ public class AgentTargetPromptOrderTest {
             return shown.get("promptCount").getAsInt() == before + 2 && !shown.get("waiting").getAsBoolean() && shown.get("prompt").getAsString().equals(TARGET);
         });
         assertFalse(match.http.get("/game").has("selection"), "it has no selection");
+
+        // A prompt kept back is the one the host has up. An action that names the prompt before it waits for
+        // the new one to show and is then not sent.
+        match.hostPrompts(TARGET + " again");
+        final JsonObject late = BridgeHttp.body("action", "selectPlayer", "id", me.getId(), "at", before + 2);
+        final JsonObject answer = match.http.post("/game/act", late);
+        assertTrue(answer.has("stale") && answer.get("stale").getAsBoolean(), "the action named the earlier prompt and was not sent: " + answer);
+        assertEquals(answer.get("promptCount").getAsInt(), before + 3, "the kept back prompt is the one up: " + answer);
         match.finish();
     }
 }
