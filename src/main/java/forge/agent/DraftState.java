@@ -28,6 +28,11 @@ record DraftState(List<PaperCard> pack, int seatIndex, int packNumber, int pickN
         return (int) Math.max(0, timerSeconds - (System.currentTimeMillis() - packArrivedAt) / 1000);
     }
 
+    /** Names the pack waiting for a pick, as {@code pack:pick}. Null when none is waiting. A pick can name it so that it is not made from a later pack. */
+    String at() {
+        return pickPending ? packNumber + ":" + pickNumber : null;
+    }
+
     DraftState queueDepths(final int[] depths) {
         return new DraftState(pack, seatIndex, packNumber, pickNumber, timerSeconds, packArrivedAt, depths == null ? new int[0] : depths.clone(),
                 pickPending, pool, poolEventId, poolPath);

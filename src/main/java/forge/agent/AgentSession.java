@@ -91,6 +91,13 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private volatile Deck lobbyDeck;
     final List<String> picks = new CopyOnWriteArrayList<>();
     final List<String> autoPicks = new CopyOnWriteArrayList<>();
+    /**
+     * The pick sent to the host and not yet in {@link #picks}. The host tells every client when a seat has picked,
+     * and drops a pick whose card is not in the seat's pack without a word. Under {@code draftLock}.
+     */
+    private String sentPick;
+    /** The host picked for the seat, and its notice that the seat has picked is still to come. Under {@code draftLock}. */
+    private boolean autoPickEcho;
 
     /**
      * When the host passes priority for our seat because it has no available actions. Forge's check misses
@@ -450,6 +457,15 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     @Override
     public void draftSeatPicked(final int seat, final int[] queueDepths) {
         synchronized (draftLock) {
+            if (seat == draft.seatIndex()) {
+                // The host sends its own pick for the seat first, then this notice for it.
+                if (autoPickEcho) {
+                    autoPickEcho = false;
+                } else if (sentPick != null) {
+                    picks.add(sentPick);
+                    sentPick = null;
+                }
+            }
             draft = draft.queueDepths(queueDepths);
         }
         changed();
@@ -458,8 +474,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     @Override
     public void draftAutoPicked(final int seat, final PaperCard card, final int packNo, final int pickInPack) {
         autoPicks.add(card.getName() + " (pack " + packNo + " pick " + pickInPack + ")");
-        picks.add(card.getName());
         synchronized (draftLock) {
+            picks.add(card.getName());
+            autoPickEcho = true;
             draft = draft.picked();
         }
         changed();
@@ -490,6 +507,8 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private void startEvent() {
         picks.clear();
         autoPicks.clear();
+        sentPick = null;
+        autoPickEcho = false;
     }
 
     /**
@@ -560,40 +579,51 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         return out;
     }
 
-    /** Picks a card from the current pack by exact name or 0-based index string. */
-    synchronized Map<String, Object> pick(final String card) {
-        final DraftState d = draft;
-        final List<PaperCard> pack = d.pack();
-        if (pack == null || !d.pickPending()) {
-            throw new IllegalStateException("no pack waiting for a pick");
-        }
-        PaperCard chosen = null;
-        try {
-            final int idx = Integer.parseInt(card.trim());
-            if (idx >= 0 && idx < pack.size()) {
-                chosen = pack.get(idx);
+    /**
+     * Picks a card from the current pack by exact name or 0-based index string. {@code at} names the pack the
+     * seat chose from, as {@link DraftState#at()} gave it. When another pack is waiting, or none, the pick is
+     * not sent and the answer has {@code stale}. Null sends the pick whatever pack is waiting.
+     */
+    synchronized Map<String, Object> pick(final String card, final String at) {
+        final Map<String, Object> out = new LinkedHashMap<>();
+        final DraftState d;
+        final PaperCard chosen;
+        // Held from the check to the send, so the next pack cannot arrive between them.
+        synchronized (draftLock) {
+            d = draft;
+            if (at != null && !at.trim().equals(d.at())) {
+                out.put("stale", true);
+                out.put("at", d.at());
+                return out;
             }
-        } catch (final NumberFormatException ignored) {
-            for (final PaperCard pc : pack) {
-                if (pc.getName().equalsIgnoreCase(card.trim())) {
-                    chosen = pc;
-                    break;
+            final List<PaperCard> pack = d.pack();
+            if (pack == null || !d.pickPending()) {
+                throw new IllegalStateException("no pack waiting for a pick");
+            }
+            PaperCard found = null;
+            try {
+                final int idx = Integer.parseInt(card.trim());
+                if (idx >= 0 && idx < pack.size()) {
+                    found = pack.get(idx);
+                }
+            } catch (final NumberFormatException ignored) {
+                for (final PaperCard pc : pack) {
+                    if (pc.getName().equalsIgnoreCase(card.trim())) {
+                        found = pc;
+                        break;
+                    }
                 }
             }
-        }
-        if (chosen == null) {
-            throw new IllegalArgumentException("'" + card + "' is not in the current pack");
-        }
-        requireClient().send(new DraftPickEvent(d.seatIndex(), chosen));
-        picks.add(chosen.getName());
-        synchronized (draftLock) {
-            // The next pack can arrive before this line. It is then the one waiting for a pick.
-            if (draft.pack() == pack) {
-                draft = draft.picked();
+            if (found == null) {
+                throw new IllegalArgumentException("'" + card + "' is not in the current pack");
             }
+            chosen = found;
+            requireClient().send(new DraftPickEvent(d.seatIndex(), chosen));
+            // It joins the picks when the host says the seat has picked.
+            sentPick = chosen.getName();
+            draft = d.picked();
         }
         changed();
-        final Map<String, Object> out = new LinkedHashMap<>();
         out.put("picked", Snapshots.describe(chosen));
         out.put("packNumber", d.packNumber());
         out.put("pickNumber", d.pickNumber());
