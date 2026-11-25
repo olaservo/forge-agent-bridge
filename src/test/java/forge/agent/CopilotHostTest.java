@@ -35,6 +35,8 @@ import forge.game.card.Card;
 import forge.game.player.Player;
 import forge.game.zone.ZoneType;
 import forge.gamemodes.match.HostedMatch;
+import forge.gamemodes.net.server.FServerManager;
+import forge.gamemodes.net.server.RemoteClientGuiGame;
 import forge.gamemodes.net.server.ServerGameLobby;
 
 /**
@@ -479,6 +481,8 @@ public class CopilotHostTest {
 
         assertEquals(count(chat(opponent.http), "has a copilot"), 1, "the opponent was told once: " + chat(opponent.http));
         assertEquals(count(chat(watched.http), "has a copilot"), 1, "the watched seat was told once");
+        final String told = WATCHED + " has a copilot: an AI assistant that sees " + WATCHED + "'s hand and prompts and can advise " + WATCHED + ".";
+        assertTrue(chat(opponent.http).contains(told), "the line says what the copilot sees: " + chat(opponent.http));
 
         watched.act("concede", null);
         AgentGameTest.waitFor("the game ends on the concession", 30_000, () -> opponent.http.get("/game").get("gameOver").getAsBoolean());
@@ -488,6 +492,45 @@ public class CopilotHostTest {
         AgentGameTest.waitFor("the host ends the match", 30_000, () -> lobby.getHostedMatch() == null);
         AgentGameTest.waitFor("the copilot stops watching after the match", 10_000, () -> !copilot.get("/copilot").get("watching").getAsBoolean());
         say("after the match " + copilot.get("/copilot"));
+    }
+
+    @Test(timeOut = 200_000)
+    public void twoSeatsUnderTheWatchedNameAreNotWatched() throws Exception {
+        host(WATCHED);
+        final CopilotHttp copilot = new CopilotHttp(host.copilot.port());
+        final Seat first = new Seat(WATCHED, "Mountain", false, new String[0], new int[0]);
+        final Seat second = new Seat(WATCHED, "Forest", false, new String[0], new int[0]);
+        first.http.post("/sit", BridgeHttp.body("port", hostPort, "name", WATCHED, "dck", WATCHED_DECK));
+        AgentGameTest.waitFor("the first seat is told it has a copilot", 20_000, () -> chat(first.http).contains(WATCHED + " has a copilot"));
+        second.http.post("/sit", BridgeHttp.body("port", hostPort, "name", WATCHED, "dck", OPPONENT_DECK));
+        AgentGameTest.waitFor("both seats are in a game", 60_000,
+                () -> first.http.get("/game").get("inGame").getAsBoolean() && second.http.get("/game").get("inGame").getAsBoolean());
+        say("lobby slot names: " + lobby.getSlot(0).getName() + ", " + lobby.getSlot(1).getName());
+        assertEquals(lobby.getSlot(0).getName(), WATCHED);
+        assertEquals(lobby.getSlot(1).getName(), WATCHED, "the lobby let a second seat take the watched name");
+
+        final JsonObject view = copilot.get("/copilot");
+        say("GET /copilot with two seats under the name: " + view);
+        assertFalse(view.get("watching").getAsBoolean(), "neither seat is watched: " + view);
+        assertTrue(view.get("reason").getAsString().contains("2 seats are named " + WATCHED), "the answer says why: " + view);
+        assertFalse(view.has("prompt") || view.has("players"), "the answer carries no view: " + view);
+        final FServerManager server = FServerManager.getInstance();
+        for (int slot = 0; slot < 2; slot++) {
+            assertEquals(server.findClientByIndex(slot).getGui().getClass(), RemoteClientGuiGame.class, "slot " + slot + " has the host's plain GUI");
+        }
+        for (final Seat seat : List.of(first, second)) {
+            AgentGameTest.waitFor("each seat is told that neither is watched", 10_000, () -> chat(seat.http).contains("so the copilot watches neither"));
+        }
+        say("chat line: " + chat(second.http).lines().filter(l -> l.contains("watches neither")).findFirst().orElse(""));
+
+        first.act("concede", null);
+        AgentGameTest.waitFor("the game ends on the concession", 30_000, () -> second.http.get("/game").get("gameOver").getAsBoolean());
+        Thread.sleep(1_500);
+        first.act("quit", null);
+        second.act("quit", null);
+        AgentGameTest.waitFor("the host ends the match", 30_000, () -> lobby.getHostedMatch() == null);
+        say("after the match: " + copilot.get("/copilot"));
+        assertFalse(copilot.get("/copilot").has("reason"), "the reason belongs to the game that started with two such seats");
     }
 
     @Test(timeOut = 120_000)

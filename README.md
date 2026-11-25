@@ -116,7 +116,9 @@ It prints `MATCH_HOST_READY port=36743` once the card database has loaded. `--se
 - `GET /copilot` on that port returns `seat` and `watching`. During a game it adds what the seat is shown: `prompt`, `promptCount`, `waiting`, `buttons`, `selection`, the `dialog` the game is waiting on, `lastAnswer`, `lastReveal`, the turn, players, zones and stack with the keys of `GET /game`, and `logCount` with the last 40 lines of the game log in `log`. `revision` goes up on each change.
 - It lists what that player may see. A card the player may not see has an id and no name, and the other player's hand is a count.
 - The port is read-only. There is no route that acts for the seat.
-- Each player in the lobby gets one chat line saying the seat has a copilot.
+- Each player in the lobby gets one chat line: "<name> has a copilot: an AI assistant that sees <name>'s hand and prompts and can advise <name>."
+- The watched player is the first one seated under the name. When two seats carry the name at the start of a game, the host watches neither, says so in chat, and `GET /copilot` gives the `reason`.
+- The program that reads this port must not also hold a seat in the game. The host cannot tell which client is the reader's, so the reader has to refuse: forge-mcp-server does.
 - A request needs `Authorization: Bearer <token>`, with the token the host was given in the environment variable `FORGE_COPILOT_TOKEN`. Any other request gets 401. Without the variable the host makes a random token and prints it nowhere, so the port answers nobody.
 
 ## HTTP API

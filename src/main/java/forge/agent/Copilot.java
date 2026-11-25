@@ -6,9 +6,12 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
-import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HexFormat;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -27,7 +30,7 @@ import forge.gamemodes.net.server.ServerGameLobby;
 
 /**
  * A read-only watch on one seat of a {@link MatchHost}, for an agent that advises the player in it.
- * The seat is named by its lobby name. Before each game the host's GUI object for that seat is replaced
+ * The seat is named by its lobby name, and the watched player is the first one seated under it. Before each game the host's GUI object for that seat is replaced
  * with a {@link CopilotGui}, and {@code GET /copilot} on a loopback port returns what it holds. There is
  * no route that acts for the seat. A request needs the token in an {@code Authorization: Bearer} header.
  * The token comes from the environment variable {@value #TOKEN_ENV}. Without one the host makes a random
@@ -48,6 +51,9 @@ final class Copilot {
     private ServerGameLobby lobby;
     private HttpServer http;
     private volatile CopilotGui gui;
+    private RemoteClient watchedClient;
+    /** Why no seat is watched in the game that started last, or null. */
+    private volatile String reason;
     private volatile boolean stopped;
 
     Copilot(final String seat, final int port, final String token) {
@@ -108,43 +114,74 @@ final class Copilot {
         return " copilotPort=" + port() + " copilot=" + seat;
     }
 
-    /** Puts the copilot's GUI on the seat's slot. The host clears a slot's GUI after each match, so this runs before each game. */
+    /**
+     * Puts the copilot's GUI on the watched client's slot. The host clears a slot's GUI after each match, so this
+     * runs before each game. With two seats under the watched name it watches neither, since the name no longer
+     * says whose cards the agent would see.
+     */
     void install() {
-        final int slot = slot();
-        final RemoteClient client = slot < 0 ? null : server.findClientByIndex(slot);
-        if (client == null) {
-            gui = null;
-            System.err.println("[copilot] no seat named " + seat + " in this game");
+        gui = null;
+        final List<RemoteClient> named = named();
+        final RemoteClient client = watched();
+        if (named.size() > 1) {
+            reason = named.size() + " seats are named " + seat + ", so the copilot watches neither in this game.";
+            server.broadcast(new MessageEvent(reason + " One of them has to take another name."));
+        } else if (client == null) {
+            reason = "No seat named " + seat + " is in this game.";
+        } else {
+            reason = null;
+            gui = new CopilotGui(client);
+            System.err.println("[copilot] watching " + seat + " in slot " + client.getIndex());
             return;
         }
-        gui = new CopilotGui(client);
-        System.err.println("[copilot] watching " + seat + " in slot " + slot);
+        System.err.println("[copilot] " + reason);
     }
 
-    private int slot() {
+    /** The clients seated under the watched name, in slot order. */
+    private List<RemoteClient> named() {
+        final List<RemoteClient> out = new ArrayList<>();
         for (int i = 0; i < lobby.getNumberOfSlots(); i++) {
             final LobbySlot s = lobby.getSlot(i);
-            if (s.getType() == LobbySlotType.REMOTE && seat.equals(s.getName())) {
-                return i;
+            final RemoteClient client = s.getType() == LobbySlotType.REMOTE && seat.equals(s.getName()) ? server.findClientByIndex(i) : null;
+            if (client != null) {
+                out.add(client);
             }
         }
-        return -1;
+        return out;
+    }
+
+    /**
+     * The client the copilot watches: the first one seated under the watched name. It stays that client while it
+     * keeps its seat, whatever another seat is named later.
+     */
+    private synchronized RemoteClient watched() {
+        final RemoteClient kept = watchedClient;
+        if (kept != null && kept.hasValidSlot() && server.findClientByIndex(kept.getIndex()) == kept) {
+            return kept;
+        }
+        final List<RemoteClient> named = named();
+        watchedClient = named.isEmpty() ? null : named.get(0);
+        return watchedClient;
     }
 
     /** Tells each player in the lobby once, in chat, that the seat has a copilot. A player who joins later is told then. */
     private void announce() {
-        final Set<String> told = new HashSet<>();
+        final Set<RemoteClient> told = Collections.newSetFromMap(new IdentityHashMap<>());
         while (!stopped) {
             try {
-                if (slot() < 0) {
-                    told.clear();
-                }
-                for (int i = 0; slot() >= 0 && i < lobby.getNumberOfSlots(); i++) {
-                    final LobbySlot s = lobby.getSlot(i);
-                    if (s.getType() == LobbySlotType.REMOTE && server.findClientByIndex(i) != null && told.add(s.getName())) {
-                        server.sendToSlot(i, new MessageEvent(seat + " has a copilot: an AI assistant that sees what " + seat + " sees and can advise."));
+                final boolean seated = watched() != null;
+                final Set<RemoteClient> present = Collections.newSetFromMap(new IdentityHashMap<>());
+                for (int i = 0; seated && i < lobby.getNumberOfSlots(); i++) {
+                    final RemoteClient client = lobby.getSlot(i).getType() == LobbySlotType.REMOTE ? server.findClientByIndex(i) : null;
+                    if (client != null) {
+                        present.add(client);
+                        if (told.add(client)) {
+                            server.sendToSlot(i, new MessageEvent(seat + " has a copilot: an AI assistant that sees " + seat + "'s hand and prompts and can advise " + seat + "."));
+                        }
                     }
                 }
+                // A seat that left and comes back is told again.
+                told.retainAll(present);
                 Thread.sleep(POLL_MILLIS);
             } catch (final InterruptedException e) {
                 return;
@@ -163,6 +200,8 @@ final class Copilot {
         m.put("watching", watching);
         if (watching) {
             m.putAll(g.snapshot());
+        } else if (reason != null && lobby.getHostedMatch() != null) {
+            m.put("reason", reason);
         }
         return m;
     }
