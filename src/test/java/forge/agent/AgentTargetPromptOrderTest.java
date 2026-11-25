@@ -4,6 +4,7 @@ import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
 
+import java.lang.reflect.Field;
 import java.util.List;
 
 import org.testng.annotations.AfterClass;
@@ -97,10 +98,23 @@ public class AgentTargetPromptOrderTest {
         // A prompt kept back is the one the host has up. An action that names the prompt before it waits for
         // the new one to show and is then not sent.
         match.hostPrompts(TARGET + " again");
+        // The host's call reaches the seat a moment later. Until then the earlier prompt is the one the host's client has.
+        AgentGameTest.waitFor("the prompt has reached the seat", 5_000, () -> keptBack() || match.http.get("/game").get("promptCount").getAsInt() == before + 3);
         final JsonObject late = BridgeHttp.body("action", "selectPlayer", "id", me.getId(), "at", before + 2);
         final JsonObject answer = match.http.post("/game/act", late);
         assertTrue(answer.has("stale") && answer.get("stale").getAsBoolean(), "the action named the earlier prompt and was not sent: " + answer);
         assertEquals(answer.get("promptCount").getAsInt(), before + 3, "the kept back prompt is the one up: " + answer);
         match.finish();
+    }
+
+    /** True while the bridge keeps a prompt back for its selection, which no route shows. */
+    private boolean keptBack() throws Exception {
+        final Field session = AgentBridge.class.getDeclaredField("session");
+        session.setAccessible(true);
+        final Field gui = AgentSession.class.getDeclaredField("gui");
+        gui.setAccessible(true);
+        final Field holding = AgentGuiGame.class.getDeclaredField("holding");
+        holding.setAccessible(true);
+        return holding.getBoolean(gui.get(session.get(match.bridge)));
     }
 }
