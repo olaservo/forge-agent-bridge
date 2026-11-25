@@ -93,5 +93,7 @@ public class AgentNotAskedTest {
     private void refused(final JsonObject body) throws Exception {
         final String answer = match.http.postExpectingError("/game/act", body).toString();
         assertTrue(answer.contains("nothing is asked of the seat") && answer.contains("was not sent"), body + " is refused with a message: " + answer);
+        // A refused action is not compared with the game before it.
+        assertTrue(!answer.contains("unchanged"), "a refusal is not also unchanged: " + answer);
     }
 }
