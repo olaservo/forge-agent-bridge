@@ -78,6 +78,8 @@ A seat changes its stops with `POST /game/stops {"own": [...], "opponent": [...]
 
 A yield never passes over an opponent's response. When an opponent adds to the stack or attacks the seat, the yield ends and the host asks the seat before anything resolves. After `endTurn` on its own turn the bridge also switches auto-pass on, as after the End Turn button, so the host then asks only a seat with something it could play. `AgentInterruptTest` plays both against a host that counters the seat's spell.
 
+A yield starts only when every item on the stack is the seat's. Forge's yield until the stack is empty also passes an item that was already under the seat's. With an opponent's item under the seat's own, `ok`, `"pass": true` and `"endTurn": true` on a cast pass one time. The seat's item resolves and the host asks the seat again with the opponent's item on top. `AgentSecondResponseTest` plays this with `pass`.
+
 The bridge sets the yield preferences it relies on after the stops: a yield ends on an opponent's spell or attack, and the host does not offer its own yield suggestions. The other yield preferences come from the Forge profile on the bridge's machine.
 
 ## Auto-join

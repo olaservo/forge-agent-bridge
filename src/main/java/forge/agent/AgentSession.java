@@ -876,20 +876,24 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
                 settle(seen);
             }
             final boolean click = !"ok".equals(action) && !"endTurn".equals(action);
-            if (click && opts.endTurn() && ownItemOnTop()) {
-                // The action cast a spell or activated an ability: the rest of the turn passes with it. Only with
-                // the seat's own item on the stack, so a card the host refused does not end the turn.
+            if ((click && opts.endTurn()) || opts.pass()) {
                 seen = revision.get();
-                actingThread = Thread.currentThread();
-                try {
-                    send("endTurn", null, null, Act.PLAIN);
-                } finally {
-                    actingThread = null;
+                if (!ownItemOnTop()) {
+                    // Nothing to pass: the action led to another prompt, or an opponent's item is on top.
+                } else if (!onlyOwnItemsOnStack()) {
+                    // An opponent's item is under the seat's. One pass, and the seat is asked again about theirs.
+                    controller().selectButtonOk();
+                } else if (click && opts.endTurn()) {
+                    // The action cast a spell or activated an ability: the rest of the turn passes with it.
+                    actingThread = Thread.currentThread();
+                    try {
+                        send("endTurn", null, null, Act.PLAIN);
+                    } finally {
+                        actingThread = null;
+                    }
+                } else {
+                    controller().sendYieldUpdate(new YieldUpdate.StackYield(gui.getCurrentPlayer(), true, true));
                 }
-                settle(seen);
-            } else if (opts.pass() && ownItemOnTop()) {
-                seen = revision.get();
-                controller().sendYieldUpdate(new YieldUpdate.StackYield(gui.getCurrentPlayer(), true, true));
                 settle(seen);
             }
             return true;
@@ -901,7 +905,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
      * is empty. {@code endTurn}: with OK, also yield until end of turn; with another action, yield until end of
      * turn if it put the seat's own spell or ability on the stack. {@code autoPay}: press Auto if the
      * action leads to the prompt that pays a cost. {@code pass}: afterwards, pass priority if the seat's own
-     * spell or ability is on top of the stack. {@code at}: send only while this is the prompt count.
+     * spell or ability is on top of the stack. With an opponent's item under the seat's on the stack, OK,
+     * {@code pass} and {@code endTurn} with another action pass one time. {@code at}: send only while this is
+     * the prompt count.
      */
     record Act(boolean once, boolean endTurn, boolean autoPay, boolean pass, Integer at) {
         static final Act PLAIN = new Act(false, false, false, false, null);
@@ -921,6 +927,24 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
         final StackItemView top = gv.peekStack();
         return top != null && top.getActivatingPlayer() != null && top.getActivatingPlayer().getId() == me.getId();
+    }
+
+    /**
+     * True when every spell and ability on the stack is the seat's own. Forge's yield until the stack is empty
+     * also passes an item that was under the seat's, and only a new item ends it.
+     */
+    private boolean onlyOwnItemsOnStack() {
+        final GameView gv = gui.getGameView();
+        final PlayerView me = gui.getCurrentPlayer();
+        if (gv == null || me == null || gv.getStack() == null || gv.getStack().isEmpty()) {
+            return false;
+        }
+        for (final StackItemView item : gv.getStack()) {
+            if (item.getActivatingPlayer() == null || item.getActivatingPlayer().getId() != me.getId()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Waits for the host's first reaction after {@code seen}, then lets it settle: it sends several updates per action. */
@@ -963,8 +987,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             if ("ok".equals(action) && !priority) {
                 c.selectButtonOk();
             }
-        } else if ("ok".equals(action) && !opts.once() && ownItemOnTop()) {
+        } else if ("ok".equals(action) && !opts.once() && ownItemOnTop() && onlyOwnItemsOnStack()) {
             // The host passes for the seat until the stack is empty, and stops when an opponent adds to it or attacks.
+            // With an opponent's item under the seat's, OK is one pass.
             c.sendYieldUpdate(new YieldUpdate.StackYield(me, true, true));
         } else {
             sendAction(c, action, id, color);
