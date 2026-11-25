@@ -51,6 +51,8 @@ public final class MatchHost {
     private final Set<Integer> told = new HashSet<>();
     private ServerGameLobby lobby;
     private volatile boolean stopped;
+    /** Watches one seat for an advising agent, or null. */
+    Copilot copilot;
 
     MatchHost(final int port, final int seats, final boolean limited) {
         this(port, seats, limited, 1);
@@ -147,11 +149,16 @@ public final class MatchHost {
             System.exit(2);
             return;
         }
+        host.copilot = Copilot.fromArgs(args);
+        if (host.copilot != null) {
+            host.copilot.start(host.lobby);
+        }
         Runtime.getRuntime().addShutdownHook(new Thread(host::close, "MatchHost-Shutdown"));
         for (int i = seats - ai; i < seats; i++) {
             System.out.println("MATCH_HOST_AI slot=" + i + " name=" + lobby.getSlot(i).getName() + " deck=" + lobby.getSlot(i).getDeckName());
         }
-        System.out.println("MATCH_HOST_READY port=" + port + " games=" + games + (ai > 0 ? " ai=" + ai : ""));
+        System.out.println("MATCH_HOST_READY port=" + port + " games=" + games + (ai > 0 ? " ai=" + ai : "")
+                + (host.copilot == null ? "" : host.copilot.readyLine()));
         System.out.flush();
         host.run();
     }
@@ -280,6 +287,9 @@ public final class MatchHost {
             if (stopped || !seatsReady()) {
                 continue;
             }
+            if (copilot != null) {
+                copilot.install();
+            }
             final Runnable start = lobby.startGame();
             if (start == null) {
                 say("The lobby refused to start the match.");
@@ -294,6 +304,9 @@ public final class MatchHost {
 
     void close() {
         stopped = true;
+        if (copilot != null) {
+            copilot.stop();
+        }
         server.stopServer();
     }
 

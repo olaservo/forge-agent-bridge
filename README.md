@@ -119,6 +119,17 @@ The host sets an AI slot up as Forge's desktop lobby does: the slot's type is AI
 - Run against bridge seats only. A Forge client as a player, and a player who disconnects during a game, have not been run.
 - An AI seat has been run with one bridge seat and one AI. More than one AI seat, and a player who disconnects from a game against the AI, have not been run.
 
+`--copilot <seat name>` has the host watch one seat for an agent that advises the player in it. The seat is named by its lobby name. Without the option the host does none of this.
+
+- The host opens a second port on 127.0.0.1, any free one or the one `--copilot-port` gives, and the ready line reads `MATCH_HOST_READY port=36743 copilotPort=<n> copilot=<seat name>`.
+- `GET /copilot` on that port returns `seat` and `watching`. During a game it adds what the seat is shown: `prompt`, `promptCount`, `waiting`, `buttons`, `selection`, the `dialog` the game is waiting on, `lastAnswer`, `lastReveal`, the turn, players, zones and stack with the keys of `GET /game`, and `logCount` with the last 40 lines of the game log in `log`. `revision` goes up on each change.
+- It lists what that player may see. A card the player may not see has an id and no name, and the other player's hand is a count.
+- The port is read-only. There is no route that acts for the seat.
+- Each player in the lobby gets one chat line: "<name> has a copilot: an AI assistant that sees <name>'s hand and prompts and can advise <name>."
+- The watched player is the first one seated under the name. When two seats carry the name at the start of a game, the host watches neither, says so in chat, and `GET /copilot` gives the `reason`.
+- The program that reads this port must not also hold a seat in the game. The host cannot tell which client is the reader's, so the reader has to refuse: forge-mcp-server does.
+- A request needs `Authorization: Bearer <token>`, with the token the host was given in the environment variable `FORGE_COPILOT_TOKEN`. Any other request gets 401. Without the variable the host makes a random token and prints it nowhere, so the port answers nobody.
+
 ## HTTP API
 
 All routes answer JSON. Errors are `{"error": "..."}` with a 4xx or 5xx status.
