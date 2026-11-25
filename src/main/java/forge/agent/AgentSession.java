@@ -118,6 +118,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
 
     {
         gui.answersItself = this::answersItself;
+        gui.lobbyDeck = () -> lobbyDeck;
     }
 
     /** The game for which the host was sent the seat's stops. */
@@ -1028,6 +1029,30 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         } catch (final InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /**
+     * Takes the cards the seat moves between its main deck and sideboard before the next game. Both lists
+     * empty is no change. The host asks for the main deck once every player has continued.
+     */
+    void sideboard(final List<String> in, final List<String> out) {
+        if (in.isEmpty() && out.isEmpty()) {
+            gui.sideboardChange = null;
+            return;
+        }
+        final GameView gv = gui.getGameView();
+        final Sideboarding.Decks decks = gui.matchDeck;
+        if (gv == null || decks == null || !gui.sideboardingOpen()) {
+            throw new IllegalStateException("no cards can be moved now. Sideboarding is open after a game that did not end the match.");
+        }
+        final Sideboarding.Change change = new Sideboarding.Change(List.copyOf(in), List.copyOf(out));
+        Sideboarding.apply(decks, change, gv.getGameType());
+        gui.sideboardChange = change;
+    }
+
+    Map<String, Object> sideboardSnapshot() {
+        final GameView gv = gui.getGameView();
+        return Sideboarding.snapshot(gui.matchDeck, gv == null ? null : gv.getGameType(), gui.sideboardingOpen());
     }
 
     /** Answers a decision and, like {@link #act}, returns once the host has reacted and gone quiet. False for an unknown id. */

@@ -13,11 +13,13 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import com.google.common.collect.Lists;
 
 import forge.LobbyPlayer;
 import forge.deck.CardPool;
+import forge.deck.Deck;
 import forge.game.GameEntityView;
 import forge.game.GameView;
 import forge.game.card.CardView;
@@ -127,6 +129,19 @@ final class AgentGuiGame extends NetworkGuiGame {
      * match, so the lines before this are from earlier games.
      */
     volatile int logStart;
+
+    /** The deck the seat set in the lobby, which is its deck when a match starts. */
+    volatile Supplier<Deck> lobbyDeck = () -> null;
+    /** The seat's main deck and sideboard as they stand in the match, or null when the bridge does not know them. */
+    volatile Sideboarding.Decks matchDeck;
+    /** The cards the seat moves before the next game, or null for none. It answers the host's next sideboard prompt. */
+    volatile Sideboarding.Change sideboardChange;
+
+    /** True after a game that did not end the match, while the seat has cards it may move before the next one. */
+    boolean sideboardingOpen() {
+        final GameView gv = getGameView();
+        return gv != null && gv.isGameOver() && !gv.isMatchOver() && Sideboarding.possible(matchDeck, gv.getGameType());
+    }
     /** True from the end of a connection until the next game opens. A prompt still queued from that connection is not asked. */
     private volatile boolean left;
     final List<String> messages = new CopyOnWriteArrayList<>();
@@ -239,9 +254,27 @@ final class AgentGuiGame extends NetworkGuiGame {
         return new OrderResult<>(ordered, false);
     }
 
+    /**
+     * The host sends the decks as they stand and waits for the main deck with no time limit. It is answered at
+     * once, with the change the seat gave or with the main deck unchanged. When the host refuses an answer it
+     * asks again, and the change is gone by then.
+     */
     @Override
     public List<PaperCard> sideboard(final CardPool sideboard, final CardPool main, final String message) {
-        return main.toFlatList();
+        Sideboarding.Decks decks = new Sideboarding.Decks(main.toFlatList(), sideboard.toFlatList());
+        final Sideboarding.Change change = sideboardChange;
+        sideboardChange = null;
+        final GameView gv = getGameView();
+        if (change != null && gv != null) {
+            try {
+                decks = Sideboarding.apply(decks, change, gv.getGameType());
+            } catch (final IllegalArgumentException e) {
+                messages.add("Sideboarding: " + e.getMessage() + " The deck is unchanged.");
+            }
+        }
+        matchDeck = decks;
+        changed();
+        return decks.main();
     }
 
     @Override
@@ -621,6 +654,7 @@ final class AgentGuiGame extends NetworkGuiGame {
             afterGameEnd();
             myPlayers = null;
             logStart = 0;
+            sideboardChange = null;
             gameFinished = false;
             next = new Prompt("", null, next.count, false, "OK", "Cancel", false, false);
             prompt = next;
@@ -651,7 +685,10 @@ final class AgentGuiGame extends NetworkGuiGame {
         messages.clear();
         final GameView gv = getGameView();
         if (gv != null && gv.getNumPlayedGamesInMatch() == 0) {
-            score = null; // the first game of a match
+            // The first game of a match. The host asks for no sideboarding before it.
+            score = null;
+            matchDeck = Sideboarding.of(lobbyDeck.get());
+            sideboardChange = null;
         }
         logStart = gv == null || gv.getGameLog() == null ? 0 : gv.getGameLog().getAllEntries().size();
         gamesOpened++;

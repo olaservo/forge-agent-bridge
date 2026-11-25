@@ -197,14 +197,16 @@ final class Snapshots {
     /**
      * Where the match stands, from what the host sends a client. {@code game} counts from 1. {@code over} is
      * set as a game ends and says whether that game decided the match. {@code wins} is null when the host's
-     * count is not known.
+     * count is not known. {@code sideboarding} is true after a game that did not, for a seat with cards to move.
      */
-    private static Map<String, Object> match(final AgentGuiGame.Score score, final GameView gv) {
+    private static Map<String, Object> match(final AgentGuiGame.Score score, final GameView gv, final boolean sideboarding) {
         final Map<String, Object> m = new LinkedHashMap<>();
         m.put("gamesPerMatch", gv.getNumGamesInMatch());
         m.put("game", gv.getNumPlayedGamesInMatch() + 1);
         m.put("wins", wins(score, gv));
         m.put("over", gv.isMatchOver());
+        // The seat may move cards between its main deck and sideboard with its continue (GET /game/sideboard).
+        m.put("sideboarding", sideboarding);
         return m;
     }
 
@@ -342,7 +344,7 @@ final class Snapshots {
         m.put("activePlayer", gv.getPlayerTurn() == null ? null : gv.getPlayerTurn().getName());
         m.put("gameOver", gv.isGameOver());
         m.put("winner", gv.getWinningPlayerName());
-        m.put("match", match(gui.score, gv));
+        m.put("match", match(gui.score, gv, gui.sideboardingOpen()));
         final PlayerView me = gui.getCurrentPlayer();
         m.put("me", me == null ? null : me.getName());
         // The host sends no new prompt when it passes for us, so a "Priority: ..." prompt can outlive our priority.
