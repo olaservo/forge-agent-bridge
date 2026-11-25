@@ -868,6 +868,12 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
      * call on its own thread, so two sent back to back can overlap there. Waiting spaces them like clicks.
      */
     Acted act(final String action, final Integer id, final Integer color, final Act opts) throws InterruptedException {
+        if (id == null && ("selectCard".equals(action) || "selectPlayer".equals(action) || "selectStack".equals(action))) {
+            throw new IllegalArgumentException(action + " needs an id. Nothing was sent.");
+        }
+        if (color == null && "useMana".equals(action)) {
+            throw new IllegalArgumentException("useMana needs a color. Nothing was sent.");
+        }
         synchronized (actLock) {
             // Let the host finish anything a just-sent "auto-pass on" started before we resume its game thread.
             final long clear = lastYieldOnAt + YIELD_ON_GAP_MILLIS - System.currentTimeMillis();
@@ -877,8 +883,15 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             if (opts.at() != null && opts.at() != gui.prompt.count()) {
                 return Acted.STALE;
             }
+            final String refusal = notAsked(action);
+            if (refusal != null) {
+                throw new IllegalStateException(refusal);
+            }
             final boolean pick = "selectCard".equals(action) || "selectPlayer".equals(action) || "selectStack".equals(action);
             final Map<String, Object> before = pick ? view() : null;
+            // The stack before the action, to tell whether the action added to it.
+            final StackItemView topBefore = top();
+            final int sizeBefore = stackSize();
             long seen = revision.get();
             actingThread = Thread.currentThread();
             try {
@@ -888,26 +901,34 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             }
             settle(seen);
             final AgentGuiGame.Prompt pay = gui.prompt;
-            if (opts.autoPay() && !pay.waiting() && pay.okEnabled() && autoLabel().equals(pay.okLabel())) {
+            // Not with a decision open, such as a choice of abilities the click brought up: the seat answers that first.
+            if (opts.autoPay() && !deciding() && !pay.waiting() && pay.okEnabled() && autoLabel().equals(pay.okLabel())) {
                 seen = revision.get();
                 controller().selectButtonOk();
                 settle(seen);
             }
             final boolean click = !"ok".equals(action) && !"endTurn".equals(action);
-            if (click && opts.endTurn() && ownItemOnTop()) {
-                // The action cast a spell or activated an ability: the rest of the turn passes with it. Only with
-                // the seat's own item on the stack, so a card the host refused does not end the turn.
+            if ((click && opts.endTurn()) || opts.pass()) {
                 seen = revision.get();
-                actingThread = Thread.currentThread();
-                try {
-                    send("endTurn", null, null, Act.PLAIN);
-                } finally {
-                    actingThread = null;
+                final StackItemView top = top();
+                if (deciding() || !ownItemOnTop() || stackSize() <= sizeBefore || (topBefore != null && top.getId() == topBefore.getId())) {
+                    // Nothing to pass: the action led to a decision or another prompt, an opponent's item is on top, or the
+                    // action put nothing on the stack. An item that was there before the action is not passed,
+                    // so a card the host refused resolves nothing and does not end the turn.
+                } else if (!onlyOwnItemsOnStack()) {
+                    // An opponent's item is under the seat's. One pass, and the seat is asked again about theirs.
+                    controller().selectButtonOk();
+                } else if (click && opts.endTurn()) {
+                    // The action cast a spell or activated an ability: the rest of the turn passes with it.
+                    actingThread = Thread.currentThread();
+                    try {
+                        send("endTurn", null, null, Act.PLAIN);
+                    } finally {
+                        actingThread = null;
+                    }
+                } else {
+                    controller().sendYieldUpdate(new YieldUpdate.StackYield(gui.getCurrentPlayer(), true, true));
                 }
-                settle(seen);
-            } else if (opts.pass() && ownItemOnTop()) {
-                seen = revision.get();
-                controller().sendYieldUpdate(new YieldUpdate.StackYield(gui.getCurrentPlayer(), true, true));
                 settle(seen);
             }
             return before != null && before.equals(view()) ? Acted.UNCHANGED : Acted.SENT;
@@ -919,7 +940,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
      * is empty. {@code endTurn}: with OK, also yield until end of turn; with another action, yield until end of
      * turn if it put the seat's own spell or ability on the stack. {@code autoPay}: press Auto if the
      * action leads to the prompt that pays a cost. {@code pass}: afterwards, pass priority if the seat's own
-     * spell or ability is on top of the stack. {@code at}: send only while this is the prompt count.
+     * spell or ability is on top of the stack. With an opponent's item under the seat's on the stack, OK,
+     * {@code pass} and {@code endTurn} with another action pass one time. {@code at}: send only while this is
+     * the prompt count.
      */
     record Act(boolean once, boolean endTurn, boolean autoPay, boolean pass, Integer at) {
         static final Act PLAIN = new Act(false, false, false, false, null);
@@ -939,6 +962,69 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
         final StackItemView top = gv.peekStack();
         return top != null && top.getActivatingPlayer() != null && top.getActivatingPlayer().getId() == me.getId();
+    }
+
+    /**
+     * Why an action is not sent, or null. While the seat waits, the host has no prompt up for it, and a click
+     * sent then would answer whichever prompt comes next. A pending decision is something the seat is asked.
+     * Cancel stays possible on the prompt that says the seat is yielding, where it ends the yield. Undo,
+     * conceding and the answers after a game are sent at any time.
+     */
+    private String notAsked(final String action) {
+        final GameView gv = gui.getGameView();
+        final AgentGuiGame.Prompt p = gui.prompt;
+        if (action == null || gv == null || gv.isGameOver() || gui.gameFinished || deciding()) {
+            return null;
+        }
+        if (!p.waiting() && gui.answering != p.count()) {
+            return null;
+        }
+        switch (action) {
+            case "ok", "selectCard", "selectPlayer", "selectStack", "useMana", "endTurn", "alphaStrike":
+                break;
+            case "cancel":
+                if (p.waiting() && p.cancelEnabled()) {
+                    return null;
+                }
+                break;
+            default:
+                return null;
+        }
+        return "nothing is asked of the seat: " + action + " was not sent. Wait for the next prompt.";
+    }
+
+    /** True while a decision waits for the seat's answer. */
+    private boolean deciding() {
+        final PendingDecision d = gui.pending;
+        return d != null && !d.isAnswered();
+    }
+
+    private StackItemView top() {
+        final GameView gv = gui.getGameView();
+        return gv == null ? null : gv.peekStack();
+    }
+
+    private int stackSize() {
+        final GameView gv = gui.getGameView();
+        return gv == null || gv.getStack() == null ? 0 : gv.getStack().size();
+    }
+
+    /**
+     * True when every spell and ability on the stack is the seat's own. Forge's yield until the stack is empty
+     * also passes an item that was under the seat's, and only a new item ends it.
+     */
+    private boolean onlyOwnItemsOnStack() {
+        final GameView gv = gui.getGameView();
+        final PlayerView me = gui.getCurrentPlayer();
+        if (gv == null || me == null || gv.getStack() == null || gv.getStack().isEmpty()) {
+            return false;
+        }
+        for (final StackItemView item : gv.getStack()) {
+            if (item.getActivatingPlayer() == null || item.getActivatingPlayer().getId() != me.getId()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Waits for the host's first reaction after {@code seen}, then lets it settle: it sends several updates per action. */
@@ -981,8 +1067,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             if ("ok".equals(action) && !priority) {
                 c.selectButtonOk();
             }
-        } else if ("ok".equals(action) && !opts.once() && ownItemOnTop()) {
+        } else if ("ok".equals(action) && !opts.once() && ownItemOnTop() && onlyOwnItemsOnStack()) {
             // The host passes for the seat until the stack is empty, and stops when an opponent adds to it or attacks.
+            // With an opponent's item under the seat's, OK is one pass.
             c.sendYieldUpdate(new YieldUpdate.StackYield(me, true, true));
         } else {
             sendAction(c, action, id, color);

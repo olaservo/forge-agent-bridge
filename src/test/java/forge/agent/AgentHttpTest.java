@@ -54,6 +54,19 @@ public class AgentHttpTest {
     }
 
     @Test(timeOut = 60_000)
+    public void aSelectWithoutAnIdIsTheCallersMistake() throws Exception {
+        bridge = new AgentBridge();
+        bridge.start(0);
+        final BridgeHttp http = new BridgeHttp(bridge.port());
+        for (final String action : new String[] {"selectCard", "selectPlayer", "selectStack"}) {
+            final String answer = http.postExpectingError("/game/act", BridgeHttp.body("action", action)).toString();
+            assertTrue(answer.contains(action + " needs an id"), answer);
+        }
+        final String answer = http.postExpectingError("/game/act", BridgeHttp.body("action", "useMana")).toString();
+        assertTrue(answer.contains("useMana needs a color"), answer);
+    }
+
+    @Test(timeOut = 60_000)
     public void aBodyThatIsNotJsonIsTheCallersMistake() throws Exception {
         bridge = new AgentBridge();
         bridge.start(0);

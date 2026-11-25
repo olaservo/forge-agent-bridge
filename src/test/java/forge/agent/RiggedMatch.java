@@ -266,6 +266,11 @@ final class RiggedMatch {
         server.findClientByIndex(1).getGui().showPromptMessage(null, message);
     }
 
+    /** Has the host tell the agent's seat to wait, as it does when one of the seat's inputs ends. The host's own prompt stays up. */
+    void hostAwaits() {
+        server.findClientByIndex(1).getGui().awaitNextInput();
+    }
+
     /** Has the host send the agent its whole game view again, as it does when the agent reports a checksum mismatch. */
     void resync() {
         server.findClientByIndex(1).getGui().setResyncPending();
@@ -283,6 +288,20 @@ final class RiggedMatch {
             }
         }
         return false;
+    }
+
+    /** True when the host holds the seat's auto-yields and automatic trigger answers as switched off. */
+    boolean hostAsksSeatAboutAutoYields() {
+        final HostedMatch hosted = lobby.getHostedMatch();
+        if (hosted == null || hosted.getHumanControllers().isEmpty()) {
+            return false;
+        }
+        for (final PlayerControllerHuman c : hosted.getHumanControllers()) {
+            if (!c.getYieldController().getDisableAutoYields() || !c.getYieldController().getDisableAutoTriggers()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     void close(final String fixturePrefix) throws Exception {

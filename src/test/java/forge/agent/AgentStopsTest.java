@@ -67,6 +67,9 @@ public class AgentStopsTest {
         assertTrue(http.postExpectingError("/game/stops", BridgeHttp.body("opponent", phases("COMBAT"))).toString().contains("unknown phase"));
         assertEquals(RiggedMatch.str(http.get("/game/stops").get("stops")), "default");
 
+        // The seed switches off the auto-yields and trigger answers of this machine's Forge profile for the seat.
+        AgentGameTest.waitFor("the host holds the seat's auto-yields as switched off", 20_000, match::hostAsksSeatAboutAutoYields);
+
         int removedInTurn = -1;
         int upkeepSetInTurn = -1;
         boolean askedAtAttackers = false;
