@@ -33,7 +33,8 @@ import forge.util.NameGenerator;
  * ends. A match is one game, or the best of three or five with {@code --games}. With {@code --ai} the
  * last slots are played by Forge's AI. Run it like {@link AgentMain}, from the folder that holds Forge's
  * {@code res}:
- * {@code java -cp <this jar><path separator><forge jar> forge.agent.MatchHost [--port N] [--seats N] [--games N] [--ai N] [--ai-deck <file or name>]... [--limited] [--exit-with-parent]}.
+ * {@code java -cp <this jar><path separator><forge jar> forge.agent.MatchHost [--port N] [--seats N] [--games N] [--ai N] [--ai-deck <file or name>]... [--limited]
+ * [--copilot <seat name>] [--copilot-port N] [--exit-with-parent]}.
  */
 public final class MatchHost {
 
