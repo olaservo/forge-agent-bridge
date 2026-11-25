@@ -164,10 +164,25 @@ public class AgentDraftTest {
                 assertEquals(pack.get("pickNumber").getAsInt(), 16 - pack.get("packSize").getAsInt(), "pick number: " + pack);
                 final int left = pack.get("secondsLeft").getAsInt();
                 assertTrue(left > 0 && left <= PICK_TIMER_SECONDS, "seconds left on the pick clock: " + pack);
+                final String at = pack.get("packNumber").getAsInt() + ":" + pack.get("pickNumber").getAsInt();
+                assertEquals(pack.get("at").getAsString(), at, "the pack names itself: " + pack);
+                if (picks == 2) {
+                    // A pick that names an earlier pack is not sent, and the pack is still waiting.
+                    final JsonObject stale = http.post("/draft/pick", BridgeHttp.body("card", "0", "at", "1:1"));
+                    assertTrue(stale.get("stale").getAsBoolean(), "a pick from another pack is stale: " + stale);
+                    assertEquals(stale.get("at").getAsString(), at);
+                    assertFalse(stale.has("picked"), "nothing was picked: " + stale);
+                    http.record("POST /draft/pick#stale", stale);
+                    final JsonObject after = http.get("/draft/pack");
+                    assertTrue(after.get("pickPending").getAsBoolean(), "the pack still waits: " + after);
+                    assertEquals(after.getAsJsonArray("picks").size(), picks, "no pick was recorded: " + after);
+                }
                 // The first pick goes by exact name, the rest by index, so both lookups are exercised.
                 final String card = picks == 0 ? pack.getAsJsonArray("pack").get(0).getAsJsonObject().get("name").getAsString() : "0";
-                final JsonObject picked = http.post("/draft/pick", BridgeHttp.body("card", card));
+                // Every second pick names its pack, and the others pick from whatever pack is waiting.
+                final JsonObject picked = http.post("/draft/pick", picks % 2 == 0 ? BridgeHttp.body("card", card, "at", at) : BridgeHttp.body("card", card));
                 assertNotNull(picked.getAsJsonObject("picked").get("name"));
+                assertFalse(picked.has("stale"), "a pick from the waiting pack is made: " + picked);
                 picks++;
             }
         }
@@ -188,6 +203,10 @@ public class AgentDraftTest {
 
         final JsonObject bad = http.postExpectingError("/draft/pick", BridgeHttp.body("card", "0"));
         assertTrue(bad.get("error").getAsString().contains("no pack"), "picking after the draft is an error: " + bad);
+        // With the pack named, the same pick is stale: no pack is waiting.
+        final JsonObject late = http.post("/draft/pick", BridgeHttp.body("card", "0", "at", "3:15"));
+        assertTrue(late.get("stale").getAsBoolean() && late.get("at").isJsonNull(), "a named pick after the draft is stale: " + late);
+        assertTrue(http.get("/status").getAsJsonObject("draft").get("at").isJsonNull(), "no pack to name once the draft is over");
 
         assertEquals(pool.get("landSet").getAsString(), "M11");
         assertFalse(http.get("/status").getAsJsonObject("draft").has("secondsLeft"), "no clock once the draft is over");

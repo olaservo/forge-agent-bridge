@@ -103,6 +103,7 @@ final class Snapshots {
         m.put("seatIndex", d.seatIndex());
         m.put("packNumber", d.packNumber());
         m.put("pickNumber", d.pickNumber());
+        m.put("at", d.at());
         m.put("timerSeconds", d.timerSeconds());
         final int secondsLeft = d.secondsLeft();
         if (secondsLeft >= 0) {

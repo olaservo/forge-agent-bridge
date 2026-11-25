@@ -168,7 +168,7 @@ public final class AgentBridge {
             case "GET /draft/pack":
                 return session.draftSnapshot(true);
             case "POST /draft/pick":
-                return session.pick(str(body, "card", null));
+                return session.pick(str(body, "card", null), optStr(body, "at"));
             case "GET /draft/pool":
                 return session.poolSnapshot();
             case "POST /draft/deck": {
