@@ -36,6 +36,8 @@ public final class MatchHost {
     private final Map<Integer, Deck> refused = new HashMap<>();
     private ServerGameLobby lobby;
     private volatile boolean stopped;
+    /** Watches one seat for an advising agent, or null. */
+    Copilot copilot;
 
     MatchHost(final int port, final int seats, final boolean limited) {
         this.port = port;
@@ -74,8 +76,12 @@ public final class MatchHost {
 
         final MatchHost host = new MatchHost(port, seats, limited);
         host.open();
+        host.copilot = Copilot.fromArgs(args);
+        if (host.copilot != null) {
+            host.copilot.start(host.lobby);
+        }
         Runtime.getRuntime().addShutdownHook(new Thread(host::close, "MatchHost-Shutdown"));
-        System.out.println("MATCH_HOST_READY port=" + port);
+        System.out.println("MATCH_HOST_READY port=" + port + (host.copilot == null ? "" : host.copilot.readyLine()));
         System.out.flush();
         host.run();
     }
@@ -125,6 +131,9 @@ public final class MatchHost {
             if (stopped || !seatsReady()) {
                 continue;
             }
+            if (copilot != null) {
+                copilot.install();
+            }
             final Runnable start = lobby.startGame();
             if (start == null) {
                 say("The lobby refused to start the match.");
@@ -139,6 +148,9 @@ public final class MatchHost {
 
     void close() {
         stopped = true;
+        if (copilot != null) {
+            copilot.stop();
+        }
         server.stopServer();
     }
 
