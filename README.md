@@ -96,7 +96,7 @@ Off by default. With `--auto-join <host>:<port>` the bridge checks the host's po
 
 ## Hosting without a Forge client
 
-`MatchHost` is a Forge host with no window and no seat of its own, in the same jar. Every slot is open, so the players are whoever joins: bridge seats, and people in a Forge desktop or mobile client who connect to this machine's address and the port. It starts a match once every slot is taken and each seat is ready with a deck, and when the players have left the match it waits for them to ready up again.
+`MatchHost` is a Forge host with no window and no seat of its own, in the same jar. Every slot is open unless `--ai` gives some to Forge's AI, so the players are whoever joins: bridge seats, and people in a Forge desktop or mobile client who connect to this machine's address and the port. It starts a match once every slot is taken and each seat is ready with a deck, and when the players have left the match it waits for them to ready up again.
 
 ```
 java -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Dio.netty.tryReflectionSetAccessible=true -Xmx2048m -cp "<bridge jar>;<forge jar>" forge.agent.MatchHost --port 36743 --seats 2
@@ -106,11 +106,16 @@ It prints `MATCH_HOST_READY port=36743 games=1` once the card database has loade
 
 Forge 2.0.16 takes the games per match from the preference `UI_MATCHES_PER_GAME` of the machine that hosts (`HostedMatch.getDefaultRules`). The host sets it for its own process and does not save the preferences file. After a game that does not decide the match, the next game starts when every seat has sent `continue`, as it does when each player of a Forge client presses Next Game.
 
+`--ai N` gives the last N slots to Forge's AI, 0 by default. `--seats` counts them, and one slot at least stays open. Each `--ai-deck` names the deck of the next AI slot: a path to a `.dck` file, or the name of a deck in `network-events`, `constructed` or Forge's precons (`res/quest/precons`). An AI slot with no deck plays a precon that is legal in Constructed, picked at random. A deck that is not found, or breaks the lobby's deck rules, stops the host with exit code 2 and a line that says why. So does `--ai` with `--limited`.
+
+The host sets an AI slot up as Forge's desktop lobby does: the slot's type is AI, with a generated name and the deck, and Forge reads an AI slot as ready. The match starts when every open slot is taken and ready, as before. The AI uses the AI profile of the host machine's Forge preferences. Before the ready line the host prints `MATCH_HOST_AI slot=1 name=<AI name> deck=<deck name>` for each AI slot, and the ready line ends with ` ai=N`. A bridge seat sees the AI in `lobby.slots`, with `type` `AI` and its `deckName`, and each player who joins is told the AI's name and deck in chat. In a best of three or five the AI is not asked to continue: Forge waits for the human players only.
+
 - It listens on every network interface, as a Forge host does, and has no password. Anyone who can reach the port can take a seat.
 - The first player to join takes slot 0, which a desktop host keeps for itself, and Forge marks that player's chat lines "(Host)".
 - A deck that breaks the lobby's deck rules is refused with a chat line that names the seat and the problem, and the match waits for another deck. Forge's "enforce deck legality" preference turns this off, as it does for a desktop host.
 - It hosts plain Constructed or Limited matches. Variants, a format restriction and draft events are not set up; `DraftHost` in the test sources hosts a draft.
 - Run against bridge seats only. A Forge client as a player, and a player who disconnects during a game, have not been run.
+- An AI seat has been run with one bridge seat and one AI. More than one AI seat, and a player who disconnects from a game against the AI, have not been run.
 
 ## HTTP API
 

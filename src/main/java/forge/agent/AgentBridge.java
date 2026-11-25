@@ -259,7 +259,7 @@ public final class AgentBridge {
     }
 
     /** A relative path is read from the working directory, the folder that holds Forge's res. */
-    private static Deck readDeckFile(final String path) {
+    static Deck readDeckFile(final String path) {
         final File file = new File(path);
         final Deck deck = file.isFile() ? DeckSerializer.fromFile(file) : null;
         if (deck == null) {
@@ -289,6 +289,15 @@ public final class AgentBridge {
             }
             throw new IllegalArgumentException("give a deck name, dck text, or draft a pool first");
         }
+        final Deck saved = savedDeck(name);
+        if (saved == null) {
+            throw new IllegalArgumentException("no deck named '" + name + "' in network-events or constructed");
+        }
+        return saved;
+    }
+
+    /** The deck of that name in network-events or constructed, or null. */
+    static Deck savedDeck(final String name) {
         for (final Deck d : FModel.getDecks().getNetworkEventDecks()) {
             if (d.getName().equalsIgnoreCase(name)) {
                 return d;
@@ -299,7 +308,7 @@ public final class AgentBridge {
                 return d;
             }
         }
-        throw new IllegalArgumentException("no deck named '" + name + "' in network-events or constructed");
+        return null;
     }
 
     private static String optStr(final JsonObject o, final String key) {
