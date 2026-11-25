@@ -157,7 +157,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         return Localizer.getInstance().getMessage("lblEndTurn");
     }
 
-    private static String priorityPrefix() {
+    static String priorityPrefix() {
         return Localizer.getInstance().getMessage("lblPriority") + ": ";
     }
 
@@ -796,6 +796,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         if (c == null) {
             throw new IllegalStateException("no game in progress");
         }
+        gui.sent();
         return c;
     }
 
@@ -847,11 +848,26 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         return pv;
     }
 
+    /** What became of an action: not sent because its prompt is gone, sent, or sent with the view the same afterwards. */
+    enum Acted { STALE, SENT, UNCHANGED }
+
+    /**
+     * The game as a caller reads it, without the prompt count. The host ignores a click it has no use for, such
+     * as a creature that cannot block the chosen attacker, and tells a network client nothing (Forge's
+     * NetGameController.selectCard answers true whatever the input did). A view that is the same after a
+     * click is the sign the seat gets.
+     */
+    private Map<String, Object> view() {
+        final Map<String, Object> m = gameSnapshot(true);
+        m.remove("promptCount");
+        return m;
+    }
+
     /**
      * Sends one controller call and returns once the host has reacted and gone quiet. The host runs each
      * call on its own thread, so two sent back to back can overlap there. Waiting spaces them like clicks.
      */
-    boolean act(final String action, final Integer id, final Integer color, final Act opts) throws InterruptedException {
+    Acted act(final String action, final Integer id, final Integer color, final Act opts) throws InterruptedException {
         synchronized (actLock) {
             // Let the host finish anything a just-sent "auto-pass on" started before we resume its game thread.
             final long clear = lastYieldOnAt + YIELD_ON_GAP_MILLIS - System.currentTimeMillis();
@@ -859,8 +875,10 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
                 Thread.sleep(clear);
             }
             if (opts.at() != null && opts.at() != gui.prompt.count()) {
-                return false;
+                return Acted.STALE;
             }
+            final boolean pick = "selectCard".equals(action) || "selectPlayer".equals(action) || "selectStack".equals(action);
+            final Map<String, Object> before = pick ? view() : null;
             long seen = revision.get();
             actingThread = Thread.currentThread();
             try {
@@ -892,7 +910,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
                 controller().sendYieldUpdate(new YieldUpdate.StackYield(gui.getCurrentPlayer(), true, true));
                 settle(seen);
             }
-            return true;
+            return before != null && before.equals(view()) ? Acted.UNCHANGED : Acted.SENT;
         }
     }
 

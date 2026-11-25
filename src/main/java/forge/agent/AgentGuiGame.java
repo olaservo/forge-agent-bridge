@@ -6,7 +6,9 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -22,6 +24,9 @@ import forge.game.GameEntityView;
 import forge.game.GameView;
 import forge.game.card.CardView;
 import forge.game.card.CardView.CardStateView;
+import forge.game.event.GameEvent;
+import forge.game.event.GameEventAttackersDeclared;
+import forge.game.event.GameEventBlockersDeclared;
 import forge.game.phase.PhaseType;
 import forge.game.player.DelayedReveal;
 import forge.game.player.IHasIcon;
@@ -60,8 +65,8 @@ final class AgentGuiGame extends NetworkGuiGame {
     /**
      * The prompt and its buttons, replaced whole so a reader sees them together. {@code count} counts the
      * prompts the host has sent, so a caller can tell a new prompt from the one it has seen, whatever its
-     * text. {@code waiting} is true from the end of one of the seat's inputs until the host's next prompt
-     * or buttons.
+     * text. A prompt the host shows again keeps its count, see {@link #shownAgain}. {@code waiting} is true
+     * from the end of one of the seat's inputs until the host's next prompt or buttons.
      */
     record Prompt(String message, CardView card, int count, boolean waiting, String okLabel, String cancelLabel,
             boolean okEnabled, boolean cancelEnabled) {
@@ -103,6 +108,10 @@ final class AgentGuiGame extends NetworkGuiGame {
     volatile int answerReady = -1;
     /** The prompt being built. Written on the Agent-EDT thread only, like every display call. */
     private Prompt next = prompt;
+    /** Counts the clicks and answers sent to the host. */
+    private final AtomicInteger sends = new AtomicInteger();
+    /** {@code sends} when the prompt with the current count arrived. Agent-EDT thread only. */
+    private int sendsAtPrompt;
     private boolean batching;
     volatile boolean gameFinished;
     volatile int incorrectActions;
@@ -113,6 +122,9 @@ final class AgentGuiGame extends NetworkGuiGame {
     /** True from the end of a connection until the next game opens. A prompt still queued from that connection is not asked. */
     private volatile boolean left;
     final List<String> messages = new CopyOnWriteArrayList<>();
+    /** The players whose blocks the host has declared in the combat of turn {@code blocksTurn}. */
+    private final Set<Integer> blocksDeclared = ConcurrentHashMap.newKeySet();
+    private volatile int blocksTurn = -1;
 
     AgentGuiGame(final Runnable onChange, final Consumer<FGameClient.ReconnectState> onReconnectState) {
         this.onChange = onChange;
@@ -186,11 +198,17 @@ final class AgentGuiGame extends NetworkGuiGame {
         return out;
     }
 
+    /** Called before a click goes to the host. */
+    void sent() {
+        sends.incrementAndGet();
+    }
+
     boolean answer(final int id, final List<Integer> indices, final String text) {
         final PendingDecision d = pending;
         if (d == null || d.id != id || d.isAnswered()) {
             return false;
         }
+        sent();
         d.answer(indices, text);
         return true;
     }
@@ -525,12 +543,30 @@ final class AgentGuiGame extends NetworkGuiGame {
         return sel != null && (!sel.cards().isEmpty() || !sel.targets().isEmpty());
     }
 
+    /**
+     * Forge's InputAttack shows its prompt twice when it starts: showMessage reaches updateMessage through
+     * setCurrentDefender and then calls it again. A seat that read the first one had its next action refused
+     * as stale. The prompt that is up, shown again with the same text and card, is the same prompt when the
+     * seat is being asked (OK is enabled) and the bridge has sent no click or answer since it arrived: only
+     * the seat's own click ends or changes an input the host waits on. The priority prompt always counts,
+     * because the host can pass it for the seat: on a yield or stop sent earlier, or when its timer runs out.
+     */
+    private boolean shownAgain(final String message, final CardView card) {
+        return !next.waiting && next.okEnabled && sends.get() == sendsAtPrompt && message.equals(next.message)
+                && Objects.equals(card, next.card) && !message.startsWith(AgentSession.priorityPrefix());
+    }
+
     @Override
     public void showPromptMessage(final PlayerView playerView, final String message, final CardView card) {
         displayChanges.incrementAndGet();
         // Cancels the host's 250 ms timer that would replace this prompt with "Waiting for ...", as the desktop does.
         cancelAwaitNextInput();
-        next = new Prompt(message == null ? "" : message, card, next.count + 1, false, next.okLabel, next.cancelLabel,
+        final String text = message == null ? "" : message;
+        final boolean again = shownAgain(text, card);
+        if (!again) {
+            sendsAtPrompt = sends.get();
+        }
+        next = new Prompt(text, card, again ? next.count : next.count + 1, false, next.okLabel, next.cancelLabel,
                 next.okEnabled, next.cancelEnabled);
         // The priority prompt arrives as its selection, its text and then its buttons (InputPassPriority).
         answerReady = -1;
@@ -557,6 +593,32 @@ final class AgentGuiGame extends NetworkGuiGame {
             answerReady = next.count;
         }
         publish();
+    }
+
+    /**
+     * The combat view does not tell an unblocked attacker from one whose blocks are still being chosen: it
+     * lists no declared blockers for either. The host sends this event when a player's blocks are final.
+     */
+    @Override
+    public void handleGameEvent(final GameEvent event) {
+        if (event instanceof GameEventAttackersDeclared) {
+            blocksDeclared.clear();
+        } else if (event instanceof GameEventBlockersDeclared && ((GameEventBlockersDeclared) event).defendingPlayer() != null) {
+            final GameView gv = getGameView();
+            final int turn = gv == null ? -1 : gv.getTurn();
+            if (turn != blocksTurn) {
+                blocksDeclared.clear();
+                blocksTurn = turn;
+            }
+            blocksDeclared.add(((GameEventBlockersDeclared) event).defendingPlayer().getId());
+            changed();
+        }
+        super.handleGameEvent(event);
+    }
+
+    /** True once the host has said this player's blocks are final in this turn's current combat. */
+    boolean blocksDeclared(final int turn, final int playerId) {
+        return turn == blocksTurn && blocksDeclared.contains(playerId);
     }
 
     @Override
@@ -592,6 +654,7 @@ final class AgentGuiGame extends NetworkGuiGame {
             afterGameEnd();
             myPlayers = null;
             gameFinished = false;
+            blocksDeclared.clear();
             next = new Prompt("", null, next.count, false, "OK", "Cancel", false, false);
             prompt = next;
         });
@@ -619,6 +682,7 @@ final class AgentGuiGame extends NetworkGuiGame {
         // a prompt offered when the last game ended would stay, with card ids the new game does not have.
         setSelection(Selection.NONE);
         messages.clear();
+        blocksDeclared.clear();
         gamesOpened++;
         changed();
     }
