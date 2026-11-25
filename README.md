@@ -117,7 +117,7 @@ It prints `MATCH_HOST_READY port=36743` once the card database has loaded. `--se
 - It lists what that player may see. A card the player may not see has an id and no name, and the other player's hand is a count.
 - The port is read-only. There is no route that acts for the seat.
 - Each player in the lobby gets one chat line saying the seat has a copilot.
-- The port has no password. Any program on this machine can read it, including another seat's agent.
+- A request needs `Authorization: Bearer <token>`, with the token the host was given in the environment variable `FORGE_COPILOT_TOKEN`. Any other request gets 401. Without the variable the host makes a random token and prints it nowhere, so the port answers nobody.
 
 ## HTTP API
 

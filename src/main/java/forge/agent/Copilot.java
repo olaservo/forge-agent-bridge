@@ -4,7 +4,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -26,15 +29,20 @@ import forge.gamemodes.net.server.ServerGameLobby;
  * A read-only watch on one seat of a {@link MatchHost}, for an agent that advises the player in it.
  * The seat is named by its lobby name. Before each game the host's GUI object for that seat is replaced
  * with a {@link CopilotGui}, and {@code GET /copilot} on a loopback port returns what it holds. There is
- * no route that acts for the seat. Each player in the lobby is told in chat that the seat is watched.
+ * no route that acts for the seat. A request needs the token in an {@code Authorization: Bearer} header.
+ * The token comes from the environment variable {@value #TOKEN_ENV}. Without one the host makes a random
+ * token and prints it nowhere, so nothing can read the port.
+ * Each player in the lobby is told in chat that the seat is watched.
  */
 final class Copilot {
 
     private static final Set<String> LOCAL_HOSTS = Set.of("127.0.0.1", "localhost", "[::1]");
+    static final String TOKEN_ENV = "FORGE_COPILOT_TOKEN";
     private static final long POLL_MILLIS = 250;
 
     private final String seat;
     private final int requestedPort;
+    private final byte[] token;
     private final Gson gson = new GsonBuilder().serializeNulls().disableHtmlEscaping().create();
     private final FServerManager server = FServerManager.getInstance();
     private ServerGameLobby lobby;
@@ -42,9 +50,16 @@ final class Copilot {
     private volatile CopilotGui gui;
     private volatile boolean stopped;
 
-    Copilot(final String seat, final int port) {
+    Copilot(final String seat, final int port, final String token) {
         this.seat = seat;
         this.requestedPort = port;
+        this.token = ("Bearer " + (token == null || token.isBlank() ? randomToken() : token)).getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static String randomToken() {
+        final byte[] bytes = new byte[32];
+        new SecureRandom().nextBytes(bytes);
+        return HexFormat.of().formatHex(bytes);
     }
 
     /** The copilot that {@code --copilot <seat name>} and {@code --copilot-port <n>} ask for, or null without the first. */
@@ -58,7 +73,7 @@ final class Copilot {
                 port = Integer.parseInt(args[++i]);
             }
         }
-        return seat == null ? null : new Copilot(seat, port);
+        return seat == null ? null : new Copilot(seat, port, System.getenv(TOKEN_ENV));
     }
 
     /** Opens the loopback port and starts watching the lobby for the seat. */
@@ -158,6 +173,8 @@ final class Copilot {
             final String name = host == null ? "" : host.replaceFirst(":\\d+$", "").toLowerCase();
             if (ex.getRequestHeaders().getFirst("Origin") != null || !LOCAL_HOSTS.contains(name)) {
                 write(ex, 403, Map.of("error", "local programs only"));
+            } else if (!authorised(ex)) {
+                write(ex, 401, Map.of("error", "the Authorization header must carry the copilot token"));
             } else if (!"GET".equals(ex.getRequestMethod())) {
                 write(ex, 405, Map.of("error", "the copilot port is read-only"));
             } else if ("/copilot".equals(ex.getRequestURI().getPath())) {
@@ -169,6 +186,11 @@ final class Copilot {
             e.printStackTrace();
             write(ex, 500, Map.of("error", e.toString()));
         }
+    }
+
+    private boolean authorised(final HttpExchange ex) {
+        final String given = ex.getRequestHeaders().getFirst("Authorization");
+        return given != null && MessageDigest.isEqual(given.getBytes(StandardCharsets.UTF_8), token);
     }
 
     private void write(final HttpExchange ex, final int code, final Object payload) throws IOException {

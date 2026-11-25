@@ -5,6 +5,14 @@ import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -19,6 +27,7 @@ import org.testng.annotations.Test;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import forge.game.Game;
 import forge.game.card.Card;
@@ -36,6 +45,7 @@ public class CopilotHostTest {
 
     private static final String WATCHED = "Johnny";
     private static final String OPPONENT = "Opponent";
+    private static final String TOKEN = "test-token-7f3a";
     private static final String WATCHED_DECK = String.join("\n",
             "[metadata]",
             "Name=Copilot Host Watched",
@@ -79,7 +89,7 @@ public class CopilotHostTest {
         host = new MatchHost(hostPort, 2, true);
         lobby = host.open();
         if (copilotSeat != null) {
-            host.copilot = new Copilot(copilotSeat, 0);
+            host.copilot = new Copilot(copilotSeat, 0, TOKEN);
             host.copilot.start(lobby);
         }
         loop = new Thread(() -> {
@@ -228,6 +238,32 @@ public class CopilotHostTest {
         }
     }
 
+    /** The copilot port, read with the token unless a header is given. */
+    private static final class CopilotHttp {
+        private final HttpClient http = HttpClient.newHttpClient();
+        private final String url;
+
+        CopilotHttp(final int port) {
+            url = "http://127.0.0.1:" + port + "/copilot";
+        }
+
+        JsonObject get(final String path) throws Exception {
+            final String answer = send("GET", "Bearer " + TOKEN);
+            assertTrue(answer.startsWith("200 "), "GET /copilot with the token: " + answer);
+            return JsonParser.parseString(answer.substring(4)).getAsJsonObject();
+        }
+
+        /** The status and the body, separated by a space. */
+        String send(final String method, final String authorization) throws Exception {
+            final HttpRequest.Builder req = HttpRequest.newBuilder(URI.create(url)).method(method, HttpRequest.BodyPublishers.noBody());
+            if (authorization != null) {
+                req.header("Authorization", authorization);
+            }
+            final HttpResponse<String> res = http.send(req.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            return res.statusCode() + " " + res.body();
+        }
+    }
+
     private static void say(final String line) {
         System.out.println("[copilot-test] " + line);
     }
@@ -315,7 +351,7 @@ public class CopilotHostTest {
     @Test(timeOut = 400_000)
     public void theCopilotShowsWhatTheWatchedSeatSeesAndNoHiddenCard() throws Exception {
         host(WATCHED);
-        final BridgeHttp copilot = new BridgeHttp(host.copilot.port());
+        final CopilotHttp copilot = new CopilotHttp(host.copilot.port());
         say("ready line part:" + host.copilot.readyLine());
         JsonObject view = copilot.get("/copilot");
         assertFalse(view.get("watching").getAsBoolean(), "nothing is watched before a game: " + view);
@@ -335,6 +371,8 @@ public class CopilotHostTest {
         int secrecy = 0;
         int bothHidden = 0;
         boolean scry = false;
+        String largest = "";
+        String withDialog = null;
         final long deadline = System.currentTimeMillis() + 240_000;
         while (compared < 12 || comparedTurns.size() < 3 || watched.castOnce.size() < watched.spells.length || !scry) {
             assertTrue(System.currentTimeMillis() < deadline, "not enough comparisons in time: " + compared + " in turns " + comparedTurns + ", cast " + watched.castOnce + ", scry dialog seen " + scry);
@@ -357,6 +395,9 @@ public class CopilotHostTest {
                 final JsonObject before = copilot.get("/copilot");
                 final JsonObject client = watched.http.get("/game");
                 final JsonObject after = copilot.get("/copilot");
+                if (after.toString().length() > largest.length() && after.get("selection").toString().contains("Goblin Piker")) {
+                    largest = after.toString();
+                }
                 assertFalse(client.get("gameOver").getAsBoolean(), "the game ended early: " + client);
                 final JsonElement pd = client.get("pendingDecision");
                 if (!after.get("watching").getAsBoolean() || !before.get("revision").equals(after.get("revision"))) {
@@ -366,6 +407,7 @@ public class CopilotHostTest {
                     final JsonElement dialog = after.get("dialog");
                     if (!dialog.isJsonNull()) {
                         final JsonObject d = dialog.getAsJsonObject();
+                        withDialog = after.toString();
                         if (dialogs.add(d.get("kind").getAsString() + " " + d.get("options"))) {
                             say("dialog on the copilot " + d + " while the seat's client shows " + pd);
                         }
@@ -409,9 +451,22 @@ public class CopilotHostTest {
         assertTrue(bothHidden > 0, "at least one check ran while no opponent card was public");
         assertFalse(RiggedMatch.player(view, false).has("hand"), "the opponent's hand is not listed");
 
-        final JsonObject refused = copilot.postExpectingError("/copilot", new JsonObject());
-        say("POST /copilot answered " + refused);
-        assertTrue(refused.get("error").getAsString().contains("read-only"), "the port takes no POST: " + refused);
+        final String refused = copilot.send("POST", "Bearer " + TOKEN);
+        say("POST /copilot with the token answered " + refused);
+        assertTrue(refused.startsWith("405 ") && refused.contains("read-only"), "the port takes no POST: " + refused);
+        for (final String header : new String[] {null, "Bearer wrong", TOKEN, "Bearer " + TOKEN + "x"}) {
+            final String answer = copilot.send("GET", header);
+            say("GET /copilot with Authorization " + header + " answered " + answer);
+            assertTrue(answer.startsWith("401 "), "a request without the token is refused: " + answer);
+            assertFalse(answer.contains("Mountain") || answer.contains("prompt"), "a refusal carries no view: " + answer);
+        }
+        // the largest view and the one with a dialog open, for the MCP server's tests
+        final Path dir = Paths.get(System.getProperty("agent.fixtures", "target/agent-fixtures"));
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("copilot-GET_copilot.json"), largest + "\n");
+        if (withDialog != null) {
+            Files.writeString(dir.resolve("copilot-GET_copilot_dialog.json"), withDialog + "\n");
+        }
 
         assertEquals(count(chat(opponent.http), "has a copilot"), 1, "the opponent was told once: " + chat(opponent.http));
         assertEquals(count(chat(watched.http), "has a copilot"), 1, "the watched seat was told once");
