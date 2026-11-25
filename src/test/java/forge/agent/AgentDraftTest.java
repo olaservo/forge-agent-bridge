@@ -255,6 +255,41 @@ public class AgentDraftTest {
         assertFalse(http.get("/status").getAsJsonObject("connection").get("connected").getAsBoolean());
     }
 
+    @Test
+    public void aNewDraftStartsThePickListAgain() {
+        final AgentSession session = new AgentSession();
+        final List<PaperCard> pack = List.of(FModel.getMagicDb().getCommonCards().getCard("Plains"));
+        session.draftPackArrived(0, pack, 1, 0, 0);
+        session.picks.add("Plains");
+        session.autoPicks.add("Plains (pack 1 pick 1)");
+        // A later pack of the same draft keeps the list.
+        session.draftPackArrived(0, pack, 1, 1, 0);
+        assertEquals(session.picks.size(), 1);
+        assertEquals(session.draftSnapshot(false).get("at"), "1:2");
+        // The host ended that draft without pools and started another: its first pack finds picks on the list.
+        session.draftPackArrived(0, pack, 1, 0, 0);
+        assertTrue(session.picks.isEmpty() && session.autoPicks.isEmpty(), "the first pack of a draft starts the lists again");
+        assertEquals(session.draftSnapshot(false).get("at"), "1:1");
+    }
+
+    @Test
+    public void aCardWithTwoFacesIsDescribedWithBoth() {
+        final String giant = oracleOf("Bonecrusher Giant");
+        assertTrue(giant.contains("Whenever Bonecrusher Giant becomes the target") && giant.contains("Stomp {1}{R}: "), "an Adventure card has its Adventure: " + giant);
+        final String delver = oracleOf("Delver of Secrets");
+        assertTrue(delver.contains("At the beginning of your upkeep") && delver.contains("Insectile Aberration: Flying"), "a transforming card has its back face: " + delver);
+        final String fire = oracleOf("Fire // Ice");
+        assertTrue(fire.contains("Fire deals 2 damage divided") && fire.contains("Ice {1}{U}: "), "a split card has both halves: " + fire);
+        assertEquals(oracleOf("Grizzly Bears"), "");
+        System.out.println("[two faces] " + new com.google.gson.Gson().toJson(Snapshots.describe(FModel.getMagicDb().getCommonCards().getCard("Bonecrusher Giant"))));
+    }
+
+    private static String oracleOf(final String name) {
+        final PaperCard card = FModel.getMagicDb().getCommonCards().getCard(name);
+        assertNotNull(card, name + " in Forge's card list");
+        return String.valueOf(Snapshots.describe(card).get("oracle"));
+    }
+
     interface Check {
         boolean ok() throws Exception;
     }
