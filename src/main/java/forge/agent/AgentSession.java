@@ -867,6 +867,10 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
             if (opts.at() != null && opts.at() != gui.prompt.count()) {
                 return false;
             }
+            final String refusal = notAsked(action);
+            if (refusal != null) {
+                throw new IllegalStateException(refusal);
+            }
             // The stack before the action, to tell whether the action added to it.
             final StackItemView topBefore = top();
             final int sizeBefore = stackSize();
@@ -940,6 +944,35 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         }
         final StackItemView top = gv.peekStack();
         return top != null && top.getActivatingPlayer() != null && top.getActivatingPlayer().getId() == me.getId();
+    }
+
+    /**
+     * Why an action is not sent, or null. While the seat waits, the host has no prompt up for it, and a click
+     * sent then would answer whichever prompt comes next. A pending decision is something the seat is asked.
+     * Cancel stays possible on the prompt that says the seat is yielding, where it ends the yield. Undo,
+     * conceding and the answers after a game are sent at any time.
+     */
+    private String notAsked(final String action) {
+        final GameView gv = gui.getGameView();
+        final AgentGuiGame.Prompt p = gui.prompt;
+        if (action == null || gv == null || gv.isGameOver() || gui.gameFinished || deciding()) {
+            return null;
+        }
+        if (!p.waiting() && gui.answering != p.count()) {
+            return null;
+        }
+        switch (action) {
+            case "ok", "selectCard", "selectPlayer", "selectStack", "useMana", "endTurn", "alphaStrike":
+                break;
+            case "cancel":
+                if (p.waiting() && p.cancelEnabled()) {
+                    return null;
+                }
+                break;
+            default:
+                return null;
+        }
+        return "nothing is asked of the seat: " + action + " was not sent. Wait for the next prompt.";
     }
 
     /** True while a decision waits for the seat's answer. */
