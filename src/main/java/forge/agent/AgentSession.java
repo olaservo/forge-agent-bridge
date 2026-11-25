@@ -8,6 +8,7 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -105,6 +106,9 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     private volatile int yieldSentForGame;
     /** The game for which the host was asked to list actionable cards. */
     private volatile int highlightsSentForGame;
+    /** The game after which the seat last sent the host continue or newMatch, by the count of games opened, and which. */
+    private volatile int decisionGame = -1;
+    private volatile NextGameDecision decision;
     /** When that was, and how long the host is given to take it up before an empty list is believed. */
     private volatile long highlightsSentAt;
     private static final long HIGHLIGHTS_SETTLE_MILLIS = 2000;
@@ -998,17 +1002,54 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
                 cancelSelection(c);
                 c.concede();
             }
-            case "quit" -> c.nextGameDecision(NextGameDecision.QUIT);
-            case "continue" -> {
-                // Forge's own clients offer the next game only while the match is undecided (ViewWinLose).
-                final GameView gv = gui.getGameView();
-                if (gv != null && gv.isGameOver() && gv.isMatchOver()) {
-                    throw new IllegalStateException("the match is over: quit leaves it, newMatch plays it again");
-                }
-                c.nextGameDecision(NextGameDecision.CONTINUE);
+            case "quit" -> {
+                finishedGame("quit", " Concede first, or disconnect.");
+                c.nextGameDecision(NextGameDecision.QUIT);
             }
-            case "newMatch" -> c.nextGameDecision(NextGameDecision.NEW);
+            case "continue" -> {
+                undecided(finishedGame("continue", ""));
+                unanswered();
+                c.nextGameDecision(NextGameDecision.CONTINUE);
+                decisionGame = gui.gamesOpened;
+                decision = NextGameDecision.CONTINUE;
+            }
+            case "newMatch" -> {
+                finishedGame("newMatch", "");
+                unanswered();
+                c.nextGameDecision(NextGameDecision.NEW);
+                decisionGame = gui.gamesOpened;
+                decision = NextGameDecision.NEW;
+            }
             default -> throw new IllegalArgumentException("unknown action " + action);
+        }
+    }
+
+    /**
+     * The seat's finished game. Forge's host acts on quit, continue and newMatch whenever they arrive
+     * (HostedMatch.addNextGameDecision): during a game, quit ends the match for everyone, and continue ends the
+     * game and starts another once every human player has sent it. Forge's clients offer the three only on the
+     * screen that ends a game, so they are sent only then.
+     */
+    private GameView finishedGame(final String action, final String instead) {
+        final GameView gv = gui.getGameView();
+        if (gv == null || !gv.isGameOver()) {
+            throw new IllegalStateException("no game has ended: " + action + " answers the end of a game. Nothing was sent." + instead);
+        }
+        return gv;
+    }
+
+    /** Forge's own clients offer the next game only while the match is undecided (ViewWinLose). */
+    private static void undecided(final GameView gv) {
+        if (gv.isMatchOver()) {
+            throw new IllegalStateException("the match is over: quit leaves it, newMatch plays it again");
+        }
+    }
+
+    /** One answer per finished game. The host keeps it until every player has answered. */
+    private void unanswered() {
+        if (decisionGame == gui.gamesOpened) {
+            throw new IllegalStateException("you have already answered the end of this game with "
+                    + (decision == NextGameDecision.NEW ? "newMatch" : "continue") + ". The next game starts when every player has answered. Nothing was sent.");
         }
     }
 
@@ -1032,22 +1073,33 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     }
 
     /**
-     * Takes the cards the seat moves between its main deck and sideboard before the next game. Both lists
-     * empty is no change. The host asks for the main deck once every player has continued.
+     * Checks a continue before it is sent, and takes the cards the seat moves between its main deck and
+     * sideboard before the next game. Both lists empty is no change. The host asks for the main deck once every
+     * player has continued. True when the seat had already continued after this game: its choice of cards is
+     * replaced and nothing more goes to the host, which holds its answer. A repeat that changes nothing is an error.
      */
-    void sideboard(final List<String> in, final List<String> out) {
-        if (in.isEmpty() && out.isEmpty()) {
-            gui.sideboardChange = null;
-            return;
+    boolean continueAgain(final List<String> in, final List<String> out) {
+        final GameView gv = finishedGame("continue", "");
+        undecided(gv);
+        Sideboarding.Change change = null;
+        if (!in.isEmpty() || !out.isEmpty()) {
+            final Sideboarding.Decks decks = gui.matchDeck;
+            if (decks == null || !gui.sideboardingOpen()) {
+                throw new IllegalStateException("no cards can be moved now. Sideboarding is open after a game that did not end the match.");
+            }
+            change = new Sideboarding.Change(List.copyOf(in), List.copyOf(out));
+            Sideboarding.apply(decks, change, gv.getGameType());
         }
-        final GameView gv = gui.getGameView();
-        final Sideboarding.Decks decks = gui.matchDeck;
-        if (gv == null || decks == null || !gui.sideboardingOpen()) {
-            throw new IllegalStateException("no cards can be moved now. Sideboarding is open after a game that did not end the match.");
+        if (decisionGame != gui.gamesOpened) {
+            gui.sideboardChange = change;
+            return false;
         }
-        final Sideboarding.Change change = new Sideboarding.Change(List.copyOf(in), List.copyOf(out));
-        Sideboarding.apply(decks, change, gv.getGameType());
+        if (decision != NextGameDecision.CONTINUE || Objects.equals(change, gui.sideboardChange)) {
+            unanswered();
+        }
         gui.sideboardChange = change;
+        changed();
+        return true;
     }
 
     Map<String, Object> sideboardSnapshot() {

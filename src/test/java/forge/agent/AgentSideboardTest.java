@@ -29,9 +29,10 @@ import forge.model.FModel;
 
 /**
  * Sideboarding between the games of a best of three on {@link MatchHost}. Both seats bring the same deck
- * with one card in the sideboard. The first seat swaps it in with its continue after game 1, and the host
- * deals game 2 from the changed deck. After game 2 it names changes the bridge refuses, continues without
- * one, and game 3 is dealt from the deck of game 2. The second seat never changes its deck.
+ * with one card in the sideboard. After game 1 the first seat names changes the bridge refuses, then swaps
+ * the card in with its continue, and the host deals game 2 from the changed deck. After game 2 it continues
+ * with the swap back and withdraws it with a second continue, and game 3 is dealt from the deck of game 2.
+ * The second seat never changes its deck.
  */
 public class AgentSideboardTest {
 
@@ -115,10 +116,17 @@ public class AgentSideboardTest {
         assertEquals(counts(sideboard, "main"), Map.of("Mountain", 20, "Goblin Piker", 19, OUT, 1), "the main deck: " + sideboard);
         assertEquals(counts(sideboard, "sideboard"), Map.of(IN, 1), "the sideboard: " + sideboard);
         assertTrue(first.get("/game").getAsJsonObject("match").get("sideboarding").getAsBoolean(), "the game state says so");
-        first.record("POST /game/act#swap", first.post("/game/act", swap("continue", List.of(IN), List.of(OUT))));
-        Thread.sleep(1_000);
-        assertSame(lobby.getHostedMatch().getGame(), game, "the next game waits for the second seat");
+        // The bridge refuses a card the seat does not have, a main deck that is too small, and cards with another action.
+        JsonObject refused = first.postExpectingError("/game/act", swap("continue", List.of("Black Lotus"), List.of(OUT)));
+        assertTrue(refused.get("error").getAsString().contains("no Black Lotus in your sideboard"), "a card that is not the seat's: " + refused);
+        refused = first.postExpectingError("/game/act", swap("continue", List.of(), List.of("Mountain")));
+        assertTrue(refused.get("error").getAsString().contains("needs 40"), "a main deck of 39: " + refused);
+        refused = first.postExpectingError("/game/act", swap("ok", List.of(IN), List.of(OUT)));
+        assertTrue(refused.get("error").getAsString().contains("go with continue"), "a change with another action: " + refused);
         second.post("/game/act", BridgeHttp.body("action", "continue", "id", null));
+        Thread.sleep(1_500);
+        assertSame(lobby.getHostedMatch().getGame(), game, "a refused change did not continue for the seat");
+        first.record("POST /game/act#swap", first.post("/game/act", swap("continue", List.of(IN), List.of(OUT))));
 
         // Game 2: the host dealt the first seat the changed deck.
         game = inGame(game, 2);
@@ -130,19 +138,19 @@ public class AgentSideboardTest {
         assertEquals(counts(sideboard, "sideboard"), Map.of(OUT, 1), "and the changed sideboard: " + sideboard);
         endGame(second, 2);
 
-        // After game 2 the bridge refuses a card the seat does not have and a main deck that is too small.
-        JsonObject refused = first.postExpectingError("/game/act", swap("continue", List.of("Black Lotus"), List.of(IN)));
-        assertTrue(refused.get("error").getAsString().contains("no Black Lotus in your sideboard"), "a card that is not the seat's: " + refused);
-        refused = first.postExpectingError("/game/act", swap("continue", List.of(), List.of("Mountain")));
-        assertTrue(refused.get("error").getAsString().contains("needs 40"), "a main deck of 39: " + refused);
-        refused = first.postExpectingError("/game/act", swap("ok", List.of(OUT), List.of(IN)));
-        assertTrue(refused.get("error").getAsString().contains("go with continue"), "a change with another action: " + refused);
-        second.post("/game/act", BridgeHttp.body("action", "continue", "id", null));
-        Thread.sleep(1_500);
-        assertSame(lobby.getHostedMatch().getGame(), game, "a refused change did not continue for the seat");
+        // After game 2 the seat continues with the cards swapped back, and then changes its mind. The host has
+        // its continue and gets no second one: only the choice the bridge holds changes.
+        first.post("/game/act", swap("continue", List.of(OUT), List.of(IN)));
+        refused = first.postExpectingError("/game/act", swap("continue", List.of(OUT), List.of(IN)));
+        assertTrue(refused.get("error").getAsString().contains("already answered the end of this game with continue"), "the same continue again: " + refused);
         first.post("/game/act", BridgeHttp.body("action", "continue", "id", null));
+        refused = first.postExpectingError("/game/act", BridgeHttp.body("action", "continue", "id", null));
+        assertTrue(refused.get("error").getAsString().contains("already answered the end of this game with continue"), "a continue that changes nothing: " + refused);
+        Thread.sleep(1_000);
+        assertSame(lobby.getHostedMatch().getGame(), game, "the next game waits for the second seat");
+        second.post("/game/act", BridgeHttp.body("action", "continue", "id", null));
 
-        // Game 3 is dealt from the decks of game 2.
+        // Game 3 is dealt from the decks of game 2: the swap back was withdrawn.
         game = inGame(game, 3);
         assertEquals(hostDeck(game, FIRST), Map.of("Mountain", 20, "Goblin Piker", 19, IN, 1), "the first seat's deck in game 3");
         assertEquals(hostDeck(game, SECOND), Map.of("Mountain", 20, "Goblin Piker", 19, OUT, 1), "the second seat's deck in game 3");

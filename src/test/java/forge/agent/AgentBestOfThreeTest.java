@@ -107,6 +107,16 @@ public class AgentBestOfThreeTest {
         final HostedMatch hosted = lobby.getHostedMatch();
         final Match match = hosted.getMatch();
         assertEquals(match.getRules().getGamesPerMatch(), 3, "the host plays three games per match");
+        // Forge's host acts on these three whenever they arrive. During a game the bridge sends none of them.
+        for (final String action : List.of("continue", "newMatch", "quit")) {
+            final JsonObject early = first.postExpectingError("/game/act", BridgeHttp.body("action", action, "id", null));
+            assertTrue(early.get("error").getAsString().contains("no game has ended"), action + " during game 1: " + early);
+        }
+        Thread.sleep(1_500);
+        assertSame(lobby.getHostedMatch(), hosted, "the match goes on");
+        assertSame(hosted.getGame(), game, "game 1 goes on");
+        assertFalse(game.isGameOver(), "game 1 is not over");
+        assertTrue(first.get("/game").get("inGame").getAsBoolean(), "the seat is still in game 1");
         concede(first, SECOND, 1, 0, 1, false);
         first.record("GET /status#gameOver", first.get("/status"));
         first.record("GET /game#gameOver", first.get("/game"));
@@ -117,6 +127,11 @@ public class AgentBestOfThreeTest {
         Thread.sleep(2_000);
         assertSame(hosted.getGame(), game, "the host starts no game while one seat has not continued");
         assertTrue(second.get("/game").get("gameOver").getAsBoolean(), "the second seat still sees the finished game");
+        for (final String action : List.of("continue", "newMatch")) {
+            final JsonObject again = first.postExpectingError("/game/act", BridgeHttp.body("action", action, "id", null));
+            assertTrue(again.get("error").getAsString().contains("already answered the end of this game with continue"),
+                    action + " after the seat has continued: " + again);
+        }
         second.post("/game/act", BridgeHttp.body("action", "continue", "id", null));
 
         // Game 2: the second seat concedes.
@@ -124,8 +139,19 @@ public class AgentBestOfThreeTest {
         first.record("GET /game#secondGame", first.get("/game"));
         first.record("GET /status#secondGame", first.get("/status"));
         first.record("GET /game/log#secondGame", first.get("/game/log"));
+        // A continue that arrives after game 2 has opened would end it on a host that waits for no other human.
+        for (final BridgeHttp seat : List.of(first, second)) {
+            final JsonObject late = seat.postExpectingError("/game/act", BridgeHttp.body("action", "continue", "id", null));
+            assertTrue(late.get("error").getAsString().contains("no game has ended"), "continue after game 2 has opened: " + late);
+        }
+        Thread.sleep(1_500);
+        assertSame(hosted.getGame(), game, "game 2 is still the running game");
+        assertFalse(game.isGameOver(), "game 2 is not over");
         concede(second, FIRST, 2, 1, 1, false);
+        // The host holds nothing from the first seat's refused continue, so the second seat's starts no game alone.
         second.post("/game/act", BridgeHttp.body("action", "continue", "id", null));
+        Thread.sleep(2_000);
+        assertSame(hosted.getGame(), game, "the host starts no game on one seat's continue after game 2");
         first.post("/game/act", BridgeHttp.body("action", "continue", "id", null));
 
         // Game 3: the first seat concedes, and the second seat has won two.

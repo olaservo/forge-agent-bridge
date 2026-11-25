@@ -201,7 +201,9 @@ public final class AgentBridge {
                 final List<String> out = names(body, "out");
                 if ("continue".equals(str(body, "action", null))) {
                     // A change the bridge refuses is an error, and the seat has not continued.
-                    session.sideboard(in, out);
+                    if (session.continueAgain(in, out)) {
+                        return session.gameSnapshot(false);
+                    }
                 } else if (!in.isEmpty() || !out.isEmpty()) {
                     throw new IllegalArgumentException("in and out go with continue");
                 }
