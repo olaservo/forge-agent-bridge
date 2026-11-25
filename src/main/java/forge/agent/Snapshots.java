@@ -290,10 +290,17 @@ final class Snapshots {
                 }
             }
             pm.put("mana", mana);
-            pm.put("battlefield", cards(p.getBattlefield()));
-            pm.put("graveyard", cards(p.getGraveyard()));
-            if (me != null && me.getId() == p.getId()) {
-                pm.put("hand", cards(p.getHand()));
+            pm.put("battlefield", cards(gui, p.getBattlefield()));
+            pm.put("graveyard", cards(gui, p.getGraveyard()));
+            if (isMe) {
+                pm.put("hand", cards(gui, p.getHand()));
+                // The top card of the seat's library while an effect lets the player look at it. The host sends
+                // every library's cards, top first, and Forge's client shows one only where canBeShownTo allows.
+                final FCollectionView<CardView> library = p.getLibrary();
+                final CardView top = library.isEmpty() ? null : library.get(0);
+                if (top != null && top.getZone() == ZoneType.Library && top.getController() != null && top.canBeShownTo(me)) {
+                    pm.put("libraryTop", describe(gui, top));
+                }
             }
             players.add(pm);
         }
@@ -332,7 +339,7 @@ final class Snapshots {
         }
         final Selection sel = gui.getSelection();
         if (sel != null) {
-            putSelection(m, sel);
+            putSelection(gui, m, sel);
         }
         return m;
     }
@@ -384,11 +391,11 @@ final class Snapshots {
      * search), players, and spells and abilities on the stack. "chosen" is what is picked so far, or the
      * attacker being blocked.
      */
-    private static void putSelection(final Map<String, Object> m, final Selection sel) {
+    private static void putSelection(final AgentGuiGame gui, final Map<String, Object> m, final Selection sel) {
         final List<Map<String, Object>> offered = new ArrayList<>();
         for (final CardView cv : sel.cards()) {
             if (cv != null) {
-                offered.add(describe(cv));
+                offered.add(describe(gui, cv));
             }
         }
         final List<Map<String, Object>> targetPlayers = entities(sel.targets(), true);
@@ -459,15 +466,28 @@ final class Snapshots {
         return out;
     }
 
-    private static List<Map<String, Object>> cards(final FCollectionView<CardView> cards) {
+    private static List<Map<String, Object>> cards(final AgentGuiGame gui, final FCollectionView<CardView> cards) {
         final List<Map<String, Object>> out = new ArrayList<>();
         if (cards == null) {
             return out;
         }
         for (final CardView cv : cards) {
-            out.add(describe(cv));
+            out.add(describe(gui, cv));
         }
         return out;
+    }
+
+    /**
+     * A card, and for a face-down one the seat may look at, the name of its other face. The host sends that
+     * face for every face-down card. Forge's client shows it only where {@code mayFlip} allows, as here.
+     */
+    static Map<String, Object> describe(final AgentGuiGame gui, final CardView cv) {
+        final Map<String, Object> m = describe(cv);
+        final CardStateView face = cv.isFaceDown() ? cv.getAlternateState() : null;
+        if (face != null && gui.getCurrentPlayer() != null && gui.mayFlip(cv)) {
+            m.put("faceUpName", face.getName());
+        }
+        return m;
     }
 
     static Map<String, Object> describe(final CardView cv) {
