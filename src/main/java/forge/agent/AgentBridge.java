@@ -197,6 +197,16 @@ public final class AgentBridge {
                 }
                 final AgentSession.Act opts = new AgentSession.Act(flag(body, "once"), flag(body, "endTurn"), pay != null,
                         flag(body, "pass"), optInt(body, "at"));
+                final List<String> in = names(body, "in");
+                final List<String> out = names(body, "out");
+                if ("continue".equals(str(body, "action", null))) {
+                    // A change the bridge refuses is an error, and the seat has not continued.
+                    if (session.continueAgain(in, out)) {
+                        return session.gameSnapshot(false);
+                    }
+                } else if (!in.isEmpty() || !out.isEmpty()) {
+                    throw new IllegalArgumentException("in and out go with continue");
+                }
                 final AgentSession.Acted acted = session.act(str(body, "action", null), optInt(body, "id"), optInt(body, "color"), opts);
                 final Map<String, Object> game = session.gameSnapshot(false);
                 if (acted == AgentSession.Acted.STALE) {
@@ -208,6 +218,8 @@ public final class AgentBridge {
                 }
                 return game;
             }
+            case "GET /game/sideboard":
+                return session.sideboardSnapshot();
             case "GET /game/stops":
                 return session.stopsSnapshot();
             case "POST /game/stops":
@@ -335,6 +347,17 @@ public final class AgentBridge {
             }
         }
         return set;
+    }
+
+    /** A list of card names, one entry per copy. Empty when the key is absent. */
+    private static List<String> names(final JsonObject o, final String key) {
+        final List<String> names = new ArrayList<>();
+        if (o.has(key) && o.get(key).isJsonArray()) {
+            for (final JsonElement e : o.getAsJsonArray(key)) {
+                names.add(e.getAsString());
+            }
+        }
+        return names;
     }
 
     private static boolean flag(final JsonObject o, final String key) {
