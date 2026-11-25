@@ -22,6 +22,8 @@ import forge.game.GameEntityView;
 import forge.game.GameView;
 import forge.game.card.CardView;
 import forge.game.card.CardView.CardStateView;
+import forge.game.event.GameEvent;
+import forge.game.event.GameEventGameOutcome;
 import forge.game.phase.PhaseType;
 import forge.game.player.DelayedReveal;
 import forge.game.player.IHasIcon;
@@ -110,6 +112,16 @@ final class AgentGuiGame extends NetworkGuiGame {
     volatile PendingDecision pending;
     /** Counts games opened, so the session can tell a new game from the one it already set up. */
     volatile int gamesOpened;
+
+    /**
+     * The games won in the match by player name, as the host counted them when a game ended. {@code games} is
+     * the number of games the count covers.
+     */
+    record Score(int games, Map<String, Integer> wins) {
+    }
+
+    /** Null until the first game of a match ends. */
+    volatile Score score;
     /** True from the end of a connection until the next game opens. A prompt still queued from that connection is not asked. */
     private volatile boolean left;
     final List<String> messages = new CopyOnWriteArrayList<>();
@@ -575,6 +587,18 @@ final class AgentGuiGame extends NetworkGuiGame {
         changed();
     }
 
+    /** With the result of a game the host sends the match score as text, which is all a client gets of it. */
+    @Override
+    public void handleGameEvent(final GameEvent event) {
+        final GameView gv = getGameView();
+        if (event instanceof GameEventGameOutcome outcome && gv != null) {
+            final Map<String, Integer> wins = Snapshots.wins(outcome.matchSummary(), gv);
+            score = wins == null ? null : new Score(gv.getNumPlayedGamesInMatch() + 1, wins);
+            changed();
+        }
+        super.handleGameEvent(event);
+    }
+
     /**
      * Forgets the game when its connection ends. Forge's client keeps one tracker per connection and merges a
      * new game view into the one held here. A view kept from an earlier connection is then split between two
@@ -619,6 +643,10 @@ final class AgentGuiGame extends NetworkGuiGame {
         // a prompt offered when the last game ended would stay, with card ids the new game does not have.
         setSelection(Selection.NONE);
         messages.clear();
+        final GameView gv = getGameView();
+        if (gv != null && gv.getNumPlayedGamesInMatch() == 0) {
+            score = null; // the first game of a match
+        }
         gamesOpened++;
         changed();
     }

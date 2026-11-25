@@ -21,8 +21,9 @@ import forge.model.FModel;
  * A Forge host with no window and no seat of its own. Every slot is open, so the players are whoever
  * joins: agent seats through the bridge, people through a Forge client. It starts a match when every
  * slot is taken and each seat is ready with a legal deck, and waits for the next one when the match
- * ends. Run it like {@link AgentMain}, from the folder that holds Forge's {@code res}:
- * {@code java -cp <this jar><path separator><forge jar> forge.agent.MatchHost [--port N] [--seats N] [--limited] [--exit-with-parent]}.
+ * ends. A match is one game, or the best of three or five with {@code --games}. Run it like {@link AgentMain},
+ * from the folder that holds Forge's {@code res}:
+ * {@code java -cp <this jar><path separator><forge jar> forge.agent.MatchHost [--port N] [--seats N] [--games N] [--limited] [--exit-with-parent]}.
  */
 public final class MatchHost {
 
@@ -32,21 +33,28 @@ public final class MatchHost {
     private final int port;
     private final int seats;
     private final boolean limited;
+    private final int games;
     private final FServerManager server = FServerManager.getInstance();
     private final Map<Integer, Deck> refused = new HashMap<>();
     private ServerGameLobby lobby;
     private volatile boolean stopped;
 
     MatchHost(final int port, final int seats, final boolean limited) {
+        this(port, seats, limited, 1);
+    }
+
+    MatchHost(final int port, final int seats, final boolean limited, final int games) {
         this.port = port;
         this.seats = seats;
         this.limited = limited;
+        this.games = games;
     }
 
     public static void main(final String[] args) throws Exception {
         int port = 36743;
         int seats = 2;
         boolean limited = false;
+        int games = 1;
         for (int i = 0; i < args.length; i++) {
             if ("--limited".equals(args[i])) {
                 limited = true;
@@ -54,12 +62,18 @@ public final class MatchHost {
                 port = Integer.parseInt(args[++i]);
             } else if ("--seats".equals(args[i]) && i + 1 < args.length) {
                 seats = Integer.parseInt(args[++i]);
+            } else if ("--games".equals(args[i]) && i + 1 < args.length) {
+                games = Integer.parseInt(args[++i]);
             } else if (ParentWatch.FLAG.equals(args[i])) {
                 ParentWatch.exitWithParent("[match-host]");
             }
         }
         if (seats < 2) {
             System.err.println("[match-host] --seats takes 2 or more, got " + seats);
+            System.exit(2);
+        }
+        if (games != 1 && games != 3 && games != 5) {
+            System.err.println("[match-host] --games takes 1, 3 or 5, got " + games);
             System.exit(2);
         }
 
@@ -72,16 +86,19 @@ public final class MatchHost {
         });
         FModel.getNetPreferences().setPref(FNetPref.UPnP, "NEVER");
 
-        final MatchHost host = new MatchHost(port, seats, limited);
+        final MatchHost host = new MatchHost(port, seats, limited, games);
         host.open();
         Runtime.getRuntime().addShutdownHook(new Thread(host::close, "MatchHost-Shutdown"));
-        System.out.println("MATCH_HOST_READY port=" + port);
+        System.out.println("MATCH_HOST_READY port=" + port + " games=" + games);
         System.out.flush();
         host.run();
     }
 
     /** Starts the server and a lobby whose slots are all open. */
     ServerGameLobby open() {
+        // Forge takes the games per match from this preference when a match starts (HostedMatch.getDefaultRules).
+        // It is set for this process only. Nothing here saves the preferences file.
+        FModel.getPreferences().setPref(FPref.UI_MATCHES_PER_GAME, String.valueOf(games));
         lobby = new ServerGameLobby();
         server.startServer(port);
         server.setLobby(lobby);

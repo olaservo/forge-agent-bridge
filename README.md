@@ -102,7 +102,9 @@ Off by default. With `--auto-join <host>:<port>` the bridge checks the host's po
 java -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Dio.netty.tryReflectionSetAccessible=true -Xmx2048m -cp "<bridge jar>;<forge jar>" forge.agent.MatchHost --port 36743 --seats 2
 ```
 
-It prints `MATCH_HOST_READY port=36743` once the card database has loaded. `--seats` is the number of players, 2 by default. `--limited` puts the lobby in Limited mode, for 40-card decks. `--exit-with-parent` works as it does for the bridge.
+It prints `MATCH_HOST_READY port=36743 games=1` once the card database has loaded. `--seats` is the number of players, 2 by default. `--limited` puts the lobby in Limited mode, for 40-card decks. `--games` is the games per match: 1 by default, or 3 or 5 for the best of that many. `--exit-with-parent` works as it does for the bridge.
+
+Forge 2.0.16 takes the games per match from the preference `UI_MATCHES_PER_GAME` of the machine that hosts (`HostedMatch.getDefaultRules`). The host sets it for its own process and does not save the preferences file. After a game that does not decide the match, the next game starts when every seat has sent `continue`, as it does when each player of a Forge client presses Next Game.
 
 - It listens on every network interface, as a Forge host does, and has no password. Anyone who can reach the port can take a seat.
 - The first player to join takes slot 0, which a desktop host keeps for itself, and Forge marks that player's chat lines "(Host)".
@@ -136,6 +138,10 @@ What the seat is asked comes in four forms in the game state:
 The bridge forgets the game when its connection ends: on `/disconnect`, when the host goes away, and while Forge's client is reconnecting. `inGame` is then false, the prompt is empty and `messages` is cleared. When the client gets its seat back the host sends the game again.
 
 `concede` first cancels an open prompt that selects cards or targets. Forge's target prompt asks again without end once the game is over, and the host's game thread died with a StackOverflowError when a seat conceded with one open.
+
+`match` in the game state says where the match stands: `gamesPerMatch`, `game` (this game's number, from 1), `wins` (games won, by player name) and `over`. `over` is set as a game ends and is true when that game decided the match. All four are what the host sends a client: the game view's `NumGamesInMatch`, `NumPlayedGamesInMatch` and `MatchOver`, and the score text of `GameEventGameOutcome`, which the game log also shows. `wins` is null when that text does not name the players of the game.
+
+Once `gameOver` is true the actions `quit`, `continue` and `newMatch` send Forge's `NextGameDecision`. `continue` starts the next game once every seat has sent it. When the match is over it is refused, as Forge's clients disable Next Game then. `quit` from any seat ends the match for everyone. The seat keeps its main deck between games: the bridge answers the host's sideboarding prompt with the deck unchanged.
 
 ## Test
 

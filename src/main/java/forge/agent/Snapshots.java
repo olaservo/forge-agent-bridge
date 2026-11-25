@@ -194,6 +194,92 @@ final class Snapshots {
         return m;
     }
 
+    /**
+     * Where the match stands, from what the host sends a client. {@code game} counts from 1. {@code over} is
+     * set as a game ends and says whether that game decided the match. {@code wins} is null when the host's
+     * count is not known.
+     */
+    private static Map<String, Object> match(final AgentGuiGame.Score score, final GameView gv) {
+        final Map<String, Object> m = new LinkedHashMap<>();
+        m.put("gamesPerMatch", gv.getNumGamesInMatch());
+        m.put("game", gv.getNumPlayedGamesInMatch() + 1);
+        m.put("wins", wins(score, gv));
+        m.put("over", gv.isMatchOver());
+        return m;
+    }
+
+    private static Map<String, Integer> wins(final AgentGuiGame.Score score, final GameView gv) {
+        final int before = gv.getNumPlayedGamesInMatch();
+        if (score != null && score.games() == before + (gv.isGameOver() ? 1 : 0)) {
+            return score.wins();
+        }
+        final Map<String, Integer> wins = new LinkedHashMap<>();
+        if (before == 0) {
+            final List<String> names = playerNames(gv);
+            if (names == null) {
+                return null;
+            }
+            for (final String name : names) {
+                wins.put(name, 0);
+            }
+        } else if (score != null && score.games() == before) {
+            wins.putAll(score.wins());
+        } else {
+            return null;
+        }
+        // The winner arrives with the game view, and the host's count a moment after it.
+        if (gv.isGameOver()) {
+            wins.computeIfPresent(Objects.toString(gv.getWinningPlayerName(), ""), (name, won) -> won + 1);
+        }
+        return wins;
+    }
+
+    private static List<String> playerNames(final GameView gv) {
+        final FCollectionView<PlayerView> players = gv.getPlayers();
+        if (players == null) {
+            return null;
+        }
+        final List<String> names = new ArrayList<>();
+        for (final PlayerView p : players) {
+            names.add(p.getName());
+        }
+        return names;
+    }
+
+    /**
+     * The games won per player, read from the text the host sends as a game ends: for each player the name,
+     * a colon, the count and a space (GameEventGameOutcome). Null when the text does not read that way for
+     * the players of this game.
+     */
+    static Map<String, Integer> wins(final String summary, final GameView gv) {
+        final List<String> names = playerNames(gv);
+        if (summary == null || names == null) {
+            return null;
+        }
+        final Map<String, Integer> wins = new LinkedHashMap<>();
+        int pos = 0;
+        while (pos < summary.length()) {
+            String found = null;
+            int end = -1;
+            for (final String name : names) {
+                final int digits = pos + name.length() + 2;
+                final int space = summary.indexOf(' ', digits);
+                final boolean longer = found == null || name.length() > found.length();
+                if (longer && !wins.containsKey(name) && summary.startsWith(name + ": ", pos) && space > digits
+                        && summary.substring(digits, space).chars().allMatch(Character::isDigit)) {
+                    found = name;
+                    end = space;
+                }
+            }
+            if (found == null) {
+                return null;
+            }
+            wins.put(found, Integer.parseInt(summary.substring(pos + found.length() + 2, end)));
+            pos = end + 1;
+        }
+        return wins.size() == names.size() ? wins : null;
+    }
+
     /** The auto-pass fields of a game snapshot: the mode, and whether the host is passing for the seat now. */
     record AutoPass(String mode, boolean now) {
     }
@@ -253,6 +339,7 @@ final class Snapshots {
         m.put("activePlayer", gv.getPlayerTurn() == null ? null : gv.getPlayerTurn().getName());
         m.put("gameOver", gv.isGameOver());
         m.put("winner", gv.getWinningPlayerName());
+        m.put("match", match(gui.score, gv));
         final PlayerView me = gui.getCurrentPlayer();
         m.put("me", me == null ? null : me.getName());
         // The host sends no new prompt when it passes for us, so a "Priority: ..." prompt can outlive our priority.
