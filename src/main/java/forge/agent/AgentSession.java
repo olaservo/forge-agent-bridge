@@ -445,9 +445,12 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
     @Override
     public void draftPackArrived(final int seat, final List<PaperCard> pack, final int packNo, final int pickNo, final int timer) {
         synchronized (draftLock) {
-            if (draft.pool() != null) {
+            // The first pack of a draft: what is listed belongs to an event before it, also one the host ended without pools.
+            if (draft.pool() != null || (packNo == 1 && pickNo == 0)) {
                 startEvent();
             }
+            // The host's notice that the seat has picked comes before the seat's next pack. One lost with the connection is not waited for.
+            autoPickEcho = false;
             // The host counts picks from 0 here and from 1 in its auto-pick notice. The bridge counts from 1.
             draft = draft.packArrived(seat, pack, packNo, pickNo + 1, timer);
         }

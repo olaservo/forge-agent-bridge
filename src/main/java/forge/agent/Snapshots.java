@@ -8,6 +8,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+import forge.card.CardRules;
+import forge.card.ICardFace;
 import forge.card.mana.ManaAtom;
 import forge.deck.Deck;
 import forge.deck.DeckSection;
@@ -178,6 +180,30 @@ final class Snapshots {
         return best;
     }
 
+    /**
+     * The rules text of every face. Forge's own text joins the halves of a split card only, so a card with an
+     * Adventure, an Omen or a back face would show its front alone. Each other face follows under its name and cost.
+     */
+    static String oracle(final CardRules rules) {
+        final ICardFace main = rules.getMainPart();
+        final StringBuilder text = new StringBuilder(main.getOracleText() == null ? "" : main.getOracleText());
+        for (final ICardFace face : rules.getAllFaces()) {
+            if (face == null || face == main || face.getOracleText() == null || face.getOracleText().isEmpty()) {
+                continue;
+            }
+            if (text.length() > 0) {
+                text.append('\n');
+            }
+            text.append(face.getName());
+            final String cost = String.valueOf(face.getManaCost());
+            if (!"no cost".equals(cost)) {
+                text.append(' ').append(cost);
+            }
+            text.append(": ").append(face.getOracleText());
+        }
+        return text.toString();
+    }
+
     static Map<String, Object> describe(final PaperCard pc) {
         final Map<String, Object> m = new LinkedHashMap<>();
         m.put("name", pc.getName());
@@ -190,7 +216,7 @@ final class Snapshots {
             m.put("colors", String.valueOf(pc.getRules().getColor()));
             m.put("power", pc.getRules().getPower());
             m.put("toughness", pc.getRules().getToughness());
-            m.put("oracle", pc.getRules().getOracleText());
+            m.put("oracle", oracle(pc.getRules()));
         }
         return m;
     }
