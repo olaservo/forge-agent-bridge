@@ -331,6 +331,7 @@ final class Snapshots {
         // Counts for a caller that wants only what is new: messages this game, and lines in the game log.
         m.put("messageCount", gui.messages.size());
         m.put("logCount", gv == null || gv.getGameLog() == null ? 0 : gv.getGameLog().getAllEntries().size());
+        m.put("logStart", gui.logStart);
         if (gv == null) {
             return m;
         }

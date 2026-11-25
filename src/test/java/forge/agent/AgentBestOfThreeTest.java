@@ -7,6 +7,7 @@ import static org.testng.Assert.assertTrue;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -15,7 +16,6 @@ import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import forge.game.Game;
@@ -50,6 +50,8 @@ public class AgentBestOfThreeTest {
     private Thread loop;
     private int hostPort;
     private String gamesPerMatchBefore;
+    /** Each seat's count of game log lines when the last game ended. */
+    private final Map<BridgeHttp, Integer> logAtGameOver = new HashMap<>();
     private BridgeHttp first;
     private BridgeHttp second;
     private final List<AgentBridge> bridges = new ArrayList<>();
@@ -100,11 +102,14 @@ public class AgentBestOfThreeTest {
 
         // Game 1: the first seat concedes.
         Game game = inGame(null, 1, 0, 0);
+        first.record("GET /game#firstGame", first.get("/game"));
+        first.record("GET /status#firstGame", first.get("/status"));
         final HostedMatch hosted = lobby.getHostedMatch();
         final Match match = hosted.getMatch();
         assertEquals(match.getRules().getGamesPerMatch(), 3, "the host plays three games per match");
         concede(first, SECOND, 1, 0, 1, false);
         first.record("GET /status#gameOver", first.get("/status"));
+        first.record("GET /game#gameOver", first.get("/game"));
         assertFalse(hosted.isMatchOver(), "the host's match is not over after one game");
 
         // The next game waits for both seats.
@@ -117,6 +122,8 @@ public class AgentBestOfThreeTest {
         // Game 2: the second seat concedes.
         game = inGame(game, 2, 0, 1);
         first.record("GET /game#secondGame", first.get("/game"));
+        first.record("GET /status#secondGame", first.get("/status"));
+        first.record("GET /game/log#secondGame", first.get("/game/log"));
         concede(second, FIRST, 2, 1, 1, false);
         second.post("/game/act", BridgeHttp.body("action", "continue", "id", null));
         first.post("/game/act", BridgeHttp.body("action", "continue", "id", null));
@@ -174,25 +181,24 @@ public class AgentBestOfThreeTest {
                         && g.getAsJsonObject("match").get("game").getAsInt() == number && !g.get("prompt").getAsString().isEmpty();
             });
         }
-        // Who plays first is a decision. The loser of the last game is asked.
-        int quiet = 0;
-        final long deadline = System.currentTimeMillis() + 30_000;
-        while (quiet < 3) {
-            assertTrue(System.currentTimeMillis() < deadline, "the seats are still being asked before game " + number);
-            quiet++;
-            for (final BridgeHttp seat : List.of(first, second)) {
-                final JsonElement pd = seat.get("/game").get("pendingDecision");
-                if (pd != null && !pd.isJsonNull()) {
-                    final JsonArray choices = new JsonArray();
-                    choices.add(0);
-                    seat.post("/game/decide", BridgeHttp.body("id", pd.getAsJsonObject().get("id").getAsInt(), "choices", choices, "text", null));
-                    quiet = 0;
-                }
+        // One seat is asked whether it plays or draws: after the first game, the loser of the last one. It plays.
+        for (final BridgeHttp seat : List.of(first, second)) {
+            final JsonObject g = seat.get("/game");
+            if (!g.get("waiting").getAsBoolean() && g.get("prompt").getAsString().contains("play or draw")) {
+                seat.post("/game/act", BridgeHttp.body("action", "ok", "id", null));
             }
-            Thread.sleep(500);
         }
         for (final BridgeHttp seat : List.of(first, second)) {
-            assertMatch(seat.get("/game"), number, firstWins, secondWins, false);
+            AgentGameTest.waitFor("a seat has its opening hand in game " + number, 30_000,
+                    () -> RiggedMatch.me(seat.get("/game")).getAsJsonArray("hand").size() == 7);
+        }
+        for (final BridgeHttp seat : List.of(first, second)) {
+            final JsonObject g = seat.get("/game");
+            assertMatch(g, number, firstWins, secondWins, false);
+            // Forge's client keeps one game log through the match, and logStart says where this game's lines begin.
+            assertEquals(g.get("logStart").getAsInt(), (int) logAtGameOver.getOrDefault(seat, 0), "the log lines before game " + number + ": " + seat.get("/game/log"));
+            final JsonArray lines = seat.get("/game/log", Map.of("since", g.get("logStart").getAsString())).getAsJsonArray("log");
+            assertFalse(lines.toString().contains("Match Result"), "the lines of game " + number + " have no earlier result: " + lines);
         }
         return game;
     }
@@ -210,6 +216,7 @@ public class AgentBestOfThreeTest {
             assertEquals(g.get("winner").getAsString(), winner, "the winner of game " + number);
             assertMatch(g, number, firstWins, secondWins, matchOver);
             assertMatch(seat.get("/status").getAsJsonObject("game"), number, firstWins, secondWins, matchOver);
+            logAtGameOver.put(seat, g.get("logCount").getAsInt());
         }
         final Match match = lobby.getHostedMatch().getMatch();
         for (final Player p : lobby.getHostedMatch().getGame().getRegisteredPlayers()) {

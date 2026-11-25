@@ -122,6 +122,11 @@ final class AgentGuiGame extends NetworkGuiGame {
 
     /** Null until the first game of a match ends. */
     volatile Score score;
+    /**
+     * The lines the game log held when this game opened. Forge's client keeps one log through the games of a
+     * match, so the lines before this are from earlier games.
+     */
+    volatile int logStart;
     /** True from the end of a connection until the next game opens. A prompt still queued from that connection is not asked. */
     private volatile boolean left;
     final List<String> messages = new CopyOnWriteArrayList<>();
@@ -615,6 +620,7 @@ final class AgentGuiGame extends NetworkGuiGame {
             resetForNewMatch();
             afterGameEnd();
             myPlayers = null;
+            logStart = 0;
             gameFinished = false;
             next = new Prompt("", null, next.count, false, "OK", "Cancel", false, false);
             prompt = next;
@@ -647,6 +653,7 @@ final class AgentGuiGame extends NetworkGuiGame {
         if (gv != null && gv.getNumPlayedGamesInMatch() == 0) {
             score = null; // the first game of a match
         }
+        logStart = gv == null || gv.getGameLog() == null ? 0 : gv.getGameLog().getAllEntries().size();
         gamesOpened++;
         changed();
     }
