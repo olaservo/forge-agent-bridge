@@ -1016,7 +1016,14 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
                 c.concede();
             }
             case "quit" -> c.nextGameDecision(NextGameDecision.QUIT);
-            case "continue" -> c.nextGameDecision(NextGameDecision.CONTINUE);
+            case "continue" -> {
+                // Forge's own clients offer the next game only while the match is undecided (ViewWinLose).
+                final GameView gv = gui.getGameView();
+                if (gv != null && gv.isGameOver() && gv.isMatchOver()) {
+                    throw new IllegalStateException("the match is over: quit leaves it, newMatch plays it again");
+                }
+                c.nextGameDecision(NextGameDecision.CONTINUE);
+            }
             case "newMatch" -> c.nextGameDecision(NextGameDecision.NEW);
             default -> throw new IllegalArgumentException("unknown action " + action);
         }

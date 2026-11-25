@@ -27,6 +27,7 @@ import forge.game.card.CardView.CardStateView;
 import forge.game.event.GameEvent;
 import forge.game.event.GameEventAttackersDeclared;
 import forge.game.event.GameEventBlockersDeclared;
+import forge.game.event.GameEventGameOutcome;
 import forge.game.phase.PhaseType;
 import forge.game.player.DelayedReveal;
 import forge.game.player.IHasIcon;
@@ -119,6 +120,21 @@ final class AgentGuiGame extends NetworkGuiGame {
     volatile PendingDecision pending;
     /** Counts games opened, so the session can tell a new game from the one it already set up. */
     volatile int gamesOpened;
+
+    /**
+     * The games won in the match by player name, as the host counted them when a game ended. {@code games} is
+     * the number of games the count covers.
+     */
+    record Score(int games, Map<String, Integer> wins) {
+    }
+
+    /** Null until the first game of a match ends. */
+    volatile Score score;
+    /**
+     * The lines the game log held when this game opened. Forge's client keeps one log through the games of a
+     * match, so the lines before this are from earlier games.
+     */
+    volatile int logStart;
     /** True from the end of a connection until the next game opens. A prompt still queued from that connection is not asked. */
     private volatile boolean left;
     final List<String> messages = new CopyOnWriteArrayList<>();
@@ -598,9 +614,16 @@ final class AgentGuiGame extends NetworkGuiGame {
     /**
      * The combat view does not tell an unblocked attacker from one whose blocks are still being chosen: it
      * lists no declared blockers for either. The host sends this event when a player's blocks are final.
+     * With the result of a game the host sends the match score as text, which is all a client gets of it.
      */
     @Override
     public void handleGameEvent(final GameEvent event) {
+        final GameView view = getGameView();
+        if (event instanceof GameEventGameOutcome outcome && view != null) {
+            final Map<String, Integer> wins = Snapshots.wins(outcome.matchSummary(), view);
+            score = wins == null ? null : new Score(view.getNumPlayedGamesInMatch() + 1, wins);
+            changed();
+        }
         if (event instanceof GameEventAttackersDeclared) {
             blocksDeclared.clear();
         } else if (event instanceof GameEventBlockersDeclared && ((GameEventBlockersDeclared) event).defendingPlayer() != null) {
@@ -653,6 +676,7 @@ final class AgentGuiGame extends NetworkGuiGame {
             resetForNewMatch();
             afterGameEnd();
             myPlayers = null;
+            logStart = 0;
             gameFinished = false;
             blocksDeclared.clear();
             next = new Prompt("", null, next.count, false, "OK", "Cancel", false, false);
@@ -683,6 +707,11 @@ final class AgentGuiGame extends NetworkGuiGame {
         setSelection(Selection.NONE);
         messages.clear();
         blocksDeclared.clear();
+        final GameView gv = getGameView();
+        if (gv != null && gv.getNumPlayedGamesInMatch() == 0) {
+            score = null; // the first game of a match
+        }
+        logStart = gv == null || gv.getGameLog() == null ? 0 : gv.getGameLog().getAllEntries().size();
         gamesOpened++;
         changed();
     }
