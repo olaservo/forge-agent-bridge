@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -449,6 +450,14 @@ public class CopilotHostTest {
         say("last copilot view lastReveal " + view.get("lastReveal") + " lastAnswer " + view.get("lastAnswer"));
         say("last copilot view opponent entry " + RiggedMatch.player(view, false));
         assertTrue(bothHidden > 0, "at least one check ran while no opponent card was public");
+        // the game log: the count, and the last lines as the seat's own client has them
+        final int logCount = view.get("logCount").getAsInt();
+        final JsonArray logLines = view.getAsJsonArray("log");
+        assertTrue(logCount > 0 && logLines.size() == Math.min(40, logCount), "the last 40 log lines of " + logCount + ": " + logLines.size());
+        final String ownLog = watched.http.get("/game/log", Map.of("since", "0")).get("log").toString();
+        final String lastLine = logLines.get(logLines.size() - 1).toString();
+        say("log count " + logCount + ", last line " + lastLine);
+        assertTrue(ownLog.contains(lastLine), "the seat's own log has the copilot's last log line " + lastLine);
         assertFalse(RiggedMatch.player(view, false).has("hand"), "the opponent's hand is not listed");
 
         final String refused = copilot.send("POST", "Bearer " + TOKEN);

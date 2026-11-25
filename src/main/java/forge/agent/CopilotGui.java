@@ -72,6 +72,7 @@ final class CopilotGui extends RemoteClientGuiGame {
             try {
                 final Map<String, Object> board = new LinkedHashMap<>();
                 CopilotView.board(board, gv, me);
+                CopilotView.log(board, gv);
                 m.putAll(board);
                 return m;
             } catch (final RuntimeException e) {

@@ -113,7 +113,7 @@ It prints `MATCH_HOST_READY port=36743` once the card database has loaded. `--se
 `--copilot <seat name>` has the host watch one seat for an agent that advises the player in it. The seat is named by its lobby name. Without the option the host does none of this.
 
 - The host opens a second port on 127.0.0.1, any free one or the one `--copilot-port` gives, and the ready line reads `MATCH_HOST_READY port=36743 copilotPort=<n> copilot=<seat name>`.
-- `GET /copilot` on that port returns `seat` and `watching`. During a game it adds what the seat is shown: `prompt`, `promptCount`, `waiting`, `buttons`, `selection`, the `dialog` the game is waiting on, `lastAnswer`, `lastReveal`, and the turn, players, zones and stack with the keys of `GET /game`. `revision` goes up on each change.
+- `GET /copilot` on that port returns `seat` and `watching`. During a game it adds what the seat is shown: `prompt`, `promptCount`, `waiting`, `buttons`, `selection`, the `dialog` the game is waiting on, `lastAnswer`, `lastReveal`, the turn, players, zones and stack with the keys of `GET /game`, and `logCount` with the last 40 lines of the game log in `log`. `revision` goes up on each change.
 - It lists what that player may see. A card the player may not see has an id and no name, and the other player's hand is a count.
 - The port is read-only. There is no route that acts for the seat.
 - Each player in the lobby gets one chat line saying the seat has a copilot.

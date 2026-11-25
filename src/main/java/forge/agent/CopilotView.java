@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import forge.game.GameLogEntry;
 import forge.game.GameView;
 import forge.game.card.CardView;
 import forge.game.combat.CombatView;
@@ -148,6 +149,20 @@ final class CopilotView {
         m.put("chosen", chosen);
         m.put("actionable", actionable);
         return m;
+    }
+
+    /** The most log lines one answer carries. */
+    private static final int LOG_LINES = 40;
+
+    /** The game log, which the host sends whole to every player: the number of lines so far and the last of them. */
+    static void log(final Map<String, Object> m, final GameView gv) {
+        final List<GameLogEntry> all = gv.getGameLog() == null ? List.of() : gv.getGameLog().getAllEntries();
+        final List<String> lines = new ArrayList<>();
+        for (int i = Math.max(0, all.size() - LOG_LINES); i < all.size(); i++) {
+            lines.add(all.get(i).toString());
+        }
+        m.put("logCount", all.size());
+        m.put("log", lines);
     }
 
     /** Turn, players, zones, stack and combat. A hand is listed for the viewer alone. */
