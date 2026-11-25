@@ -285,6 +285,20 @@ final class RiggedMatch {
         return false;
     }
 
+    /** True when the host holds the seat's auto-yields and automatic trigger answers as switched off. */
+    boolean hostAsksSeatAboutAutoYields() {
+        final HostedMatch hosted = lobby.getHostedMatch();
+        if (hosted == null || hosted.getHumanControllers().isEmpty()) {
+            return false;
+        }
+        for (final PlayerControllerHuman c : hosted.getHumanControllers()) {
+            if (!c.getYieldController().getDisableAutoYields() || !c.getYieldController().getDisableAutoTriggers()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     void close(final String fixturePrefix) throws Exception {
         if (http != null) {
             http.saveFixtures(fixturePrefix);

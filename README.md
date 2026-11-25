@@ -80,7 +80,7 @@ A yield never passes over an opponent's response. When an opponent adds to the s
 
 A yield starts only when every item on the stack is the seat's. Forge's yield until the stack is empty also passes an item that was already under the seat's. With an opponent's item under the seat's own, `ok`, `"pass": true` and `"endTurn": true` on a cast pass one time. The seat's item resolves and the host asks the seat again with the opponent's item on top. `AgentSecondResponseTest` plays this with `pass`.
 
-The bridge sets the yield preferences it relies on after the stops: a yield ends on an opponent's spell or attack, and the host does not offer its own yield suggestions. The other yield preferences come from the Forge profile on the bridge's machine.
+The bridge sets the yield preferences it relies on after the stops: a yield ends on an opponent's spell or attack, and the host does not offer its own yield suggestions. The other yield preferences come from the Forge profile on the bridge's machine. That profile's auto-yields and automatic trigger answers are switched off for the seat before the seed, so the host asks the seat about those abilities and triggers. Forge's yield until the stack is empty and its end of turn yield do not read that switch.
 
 ## Auto-join
 

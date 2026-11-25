@@ -31,6 +31,7 @@ import forge.gamemodes.match.Selection;
 import forge.gamemodes.net.NetworkGuiGame;
 import forge.gamemodes.net.client.FGameClient;
 import forge.gui.FThreads;
+import forge.interfaces.IGameController;
 import forge.item.PaperCard;
 import forge.localinstance.skin.FSkinProp;
 import forge.trackable.TrackableCollection;
@@ -658,9 +659,14 @@ final class AgentGuiGame extends NetworkGuiGame {
      */
     boolean seedStops() {
         final GameView gv = getGameView();
-        if (gv == null || gv.getPlayers() == null || getCurrentPlayer() == null) {
+        final IGameController c = getGameController();
+        if (gv == null || gv.getPlayers() == null || getCurrentPlayer() == null || c == null) {
             return false;
         }
+        // The seed carries the auto-yields and trigger answers saved in this machine's Forge profile. Switched
+        // off first, so the seed says so and the host asks the seat. The bridge's own yields do not read this.
+        c.setDisableAutoYields(true);
+        c.setDisableAutoTriggers(true);
         seedYieldStateOnHost();
         return true;
     }
