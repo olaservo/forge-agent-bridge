@@ -333,6 +333,8 @@ final class Snapshots {
         m.put("messageCount", gui.messages.size());
         m.put("logCount", gv == null || gv.getGameLog() == null ? 0 : gv.getGameLog().getAllEntries().size());
         m.put("logStart", gui.logStart);
+        // Goes up each time the host opens a game for the seat, so a caller can tell a new game from the one it knows.
+        m.put("gamesOpened", gui.gamesOpened);
         if (gv == null) {
             return m;
         }
