@@ -157,7 +157,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         return Localizer.getInstance().getMessage("lblEndTurn");
     }
 
-    private static String priorityPrefix() {
+    static String priorityPrefix() {
         return Localizer.getInstance().getMessage("lblPriority") + ": ";
     }
 
@@ -796,6 +796,7 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         if (c == null) {
             throw new IllegalStateException("no game in progress");
         }
+        gui.sent();
         return c;
     }
 

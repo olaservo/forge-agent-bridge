@@ -6,6 +6,7 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
@@ -60,8 +61,8 @@ final class AgentGuiGame extends NetworkGuiGame {
     /**
      * The prompt and its buttons, replaced whole so a reader sees them together. {@code count} counts the
      * prompts the host has sent, so a caller can tell a new prompt from the one it has seen, whatever its
-     * text. {@code waiting} is true from the end of one of the seat's inputs until the host's next prompt
-     * or buttons.
+     * text. A prompt the host shows again keeps its count, see {@link #shownAgain}. {@code waiting} is true
+     * from the end of one of the seat's inputs until the host's next prompt or buttons.
      */
     record Prompt(String message, CardView card, int count, boolean waiting, String okLabel, String cancelLabel,
             boolean okEnabled, boolean cancelEnabled) {
@@ -103,6 +104,10 @@ final class AgentGuiGame extends NetworkGuiGame {
     volatile int answerReady = -1;
     /** The prompt being built. Written on the Agent-EDT thread only, like every display call. */
     private Prompt next = prompt;
+    /** Counts the clicks and answers sent to the host. */
+    private final AtomicInteger sends = new AtomicInteger();
+    /** {@code sends} when the prompt with the current count arrived. Agent-EDT thread only. */
+    private int sendsAtPrompt;
     private boolean batching;
     volatile boolean gameFinished;
     volatile int incorrectActions;
@@ -186,11 +191,17 @@ final class AgentGuiGame extends NetworkGuiGame {
         return out;
     }
 
+    /** Called before a click goes to the host. */
+    void sent() {
+        sends.incrementAndGet();
+    }
+
     boolean answer(final int id, final List<Integer> indices, final String text) {
         final PendingDecision d = pending;
         if (d == null || d.id != id || d.isAnswered()) {
             return false;
         }
+        sent();
         d.answer(indices, text);
         return true;
     }
@@ -525,12 +536,30 @@ final class AgentGuiGame extends NetworkGuiGame {
         return sel != null && (!sel.cards().isEmpty() || !sel.targets().isEmpty());
     }
 
+    /**
+     * Forge's InputAttack shows its prompt twice when it starts: showMessage reaches updateMessage through
+     * setCurrentDefender and then calls it again. A seat that read the first one had its next action refused
+     * as stale. The prompt that is up, shown again with the same text and card, is the same prompt when the
+     * seat is being asked (OK is enabled) and the bridge has sent no click or answer since it arrived: only
+     * the seat's own click ends or changes an input the host waits on. The priority prompt always counts,
+     * because the host can pass it for the seat: on a yield or stop sent earlier, or when its timer runs out.
+     */
+    private boolean shownAgain(final String message, final CardView card) {
+        return !next.waiting && next.okEnabled && sends.get() == sendsAtPrompt && message.equals(next.message)
+                && Objects.equals(card, next.card) && !message.startsWith(AgentSession.priorityPrefix());
+    }
+
     @Override
     public void showPromptMessage(final PlayerView playerView, final String message, final CardView card) {
         displayChanges.incrementAndGet();
         // Cancels the host's 250 ms timer that would replace this prompt with "Waiting for ...", as the desktop does.
         cancelAwaitNextInput();
-        next = new Prompt(message == null ? "" : message, card, next.count + 1, false, next.okLabel, next.cancelLabel,
+        final String text = message == null ? "" : message;
+        final boolean again = shownAgain(text, card);
+        if (!again) {
+            sendsAtPrompt = sends.get();
+        }
+        next = new Prompt(text, card, again ? next.count : next.count + 1, false, next.okLabel, next.cancelLabel,
                 next.okEnabled, next.cancelEnabled);
         // The priority prompt arrives as its selection, its text and then its buttons (InputPassPriority).
         answerReady = -1;
