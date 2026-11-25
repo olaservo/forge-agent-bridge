@@ -171,7 +171,9 @@ public class AgentNewHostTest {
             players.put(p.get("name").getAsString(), "life " + p.get("life").getAsInt() + " hand " + p.get("handSize").getAsInt()
                     + " field " + ids(p, "battlefield"));
         }
-        return players + " my hand " + ids(RiggedMatch.me(g), "hand");
+        // The game view arrives a moment before the host fills it in, and names no player as the seat's until then.
+        final JsonObject me = RiggedMatch.me(g);
+        return players + " my hand " + (me == null ? "not sent yet" : ids(me, "hand"));
     }
 
     private static TreeSet<Integer> ids(final JsonObject player, final String zone) {

@@ -13,6 +13,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
+import forge.game.zone.ZoneType;
+
 /**
  * A response to an opponent's spell leaves the seat its second chance to respond. The seat's deck is Islands
  * and Opt, and the host AI casts cheap creatures. With the host's creature on the stack the seat casts Opt in
@@ -77,6 +79,12 @@ public class AgentSecondResponseTest {
                 body.addProperty("pass", true);
                 match.http.post("/game/act", body);
             } else {
+                // The seat gets its two Islands from the host, so the test does not wait on the draw for them.
+                if (asked && stack.isEmpty() && match.hostWaitsOnSeat()) {
+                    while (match.hostCount(RiggedMatch.ME, ZoneType.Battlefield, "Island") < 2) {
+                        match.hostPuts(RiggedMatch.ME, "Island");
+                    }
+                }
                 match.basics(g, "Island", "no spell", 99);
             }
         }
