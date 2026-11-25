@@ -108,12 +108,17 @@ final class AgentGuiGame extends NetworkGuiGame {
     volatile int answering = -1;
     /** The count of that prompt once its buttons have arrived with OK enabled, or -1. */
     volatile int answerReady = -1;
+    /** How long a prompt that no button answers is kept back for its selection. */
+    private static final long SELECTION_WAIT_MS = 250;
     /** The prompt being built. Written on the Agent-EDT thread only, like every display call. */
     private Prompt next = prompt;
     /** Counts the clicks and answers sent to the host. */
     private final AtomicInteger sends = new AtomicInteger();
     /** {@code sends} when the prompt with the current count arrived. Agent-EDT thread only. */
     private int sendsAtPrompt;
+    /** The count of a prompt kept back for its selection, and of one shown without it when the wait ran out. Agent-EDT only. */
+    private int held = -1;
+    private int released = -1;
     private boolean batching;
     volatile boolean gameFinished;
     volatile int incorrectActions;
@@ -153,10 +158,36 @@ final class AgentGuiGame extends NetworkGuiGame {
     }
 
     private void publish() {
-        if (!batching) {
-            prompt = next;
-            changed();
+        if (batching) {
+            return;
         }
+        if (awaitsSelection()) {
+            if (held != next.count) {
+                held = next.count;
+                final int count = next.count;
+                TIMER.schedule(() -> FThreads.invokeInEdtNowOrLater(() -> {
+                    if (held == count) {
+                        released = count;
+                        publish();
+                    }
+                }), SELECTION_WAIT_MS, TimeUnit.MILLISECONDS);
+            }
+            return;
+        }
+        held = -1;
+        prompt = next;
+        changed();
+    }
+
+    /**
+     * True for a prompt the seat has not been shown that no button answers, while nothing is offered to pick.
+     * Forge sends an input's prompt and buttons and then its selection (InputBase.showMessageInitial), so a
+     * target prompt read between the two named no target. It is kept back until the selection arrives or
+     * {@link #SELECTION_WAIT_MS} has passed.
+     */
+    private boolean awaitsSelection() {
+        return next.count != prompt.count && released != next.count && !next.waiting && !next.okEnabled && !next.cancelEnabled
+                && !offers(getSelection()) && !gameFinished && !left;
     }
 
     // ---- decisions ----
@@ -546,6 +577,9 @@ final class AgentGuiGame extends NetworkGuiGame {
     public void setSelection(final Selection sel) {
         final Selection prev = getSelection();
         super.setSelection(sel);
+        if (held == next.count && offers(sel)) {
+            publish();
+        }
         final int stamp = displayChanges.incrementAndGet();
         if (offers(prev) && !offers(sel)) {
             TIMER.schedule(() -> FThreads.invokeInEdtNowOrLater(() -> {
