@@ -45,6 +45,7 @@ import forge.item.PaperCard;
 import forge.localinstance.properties.ForgeConstants;
 import forge.localinstance.properties.ForgePreferences.FPref;
 import forge.model.FModel;
+import forge.trackable.TrackableObject;
 import forge.trackable.TrackableTypes;
 import forge.util.Localizer;
 
@@ -810,6 +811,30 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         return cv;
     }
 
+    /** A prompt that offers stack entries and no card. The host ignores a card click there and a network client is not told. */
+    private void stackPromptTakesNoCard() {
+        final Selection sel = gui.getSelection();
+        if (sel != null && sel.cards().isEmpty() && sel.offersStackItems()) {
+            throw new IllegalArgumentException("this prompt takes a spell or ability on the stack: use selectStack with an id from selection.stack");
+        }
+    }
+
+    /**
+     * A spell or ability on the stack that the prompt offers as a target. The host asks a network client to
+     * pick these in its stack view, and tells them apart by the id of the stack entry.
+     */
+    private StackItemView stackItem(final int id) {
+        final Selection sel = gui.getSelection();
+        if (sel != null) {
+            for (final TrackableObject o : sel.targets()) {
+                if (o instanceof StackItemView && o.getId() == id) {
+                    return (StackItemView) o;
+                }
+            }
+        }
+        throw new IllegalArgumentException("the prompt does not offer stack item " + id + "; selection.stack lists the ones it does");
+    }
+
     private PlayerView player(final int id) {
         final GameView gv = gui.getGameView();
         if (gv == null || gv.getTracker() == null) {
@@ -959,8 +984,12 @@ final class AgentSession implements ILobbyListener, IDraftEventHandler {
         switch (action) {
             case "ok" -> c.selectButtonOk();
             case "cancel" -> c.selectButtonCancel();
-            case "selectCard" -> c.selectCard(card(id), null, null);
+            case "selectCard" -> {
+                stackPromptTakesNoCard();
+                c.selectCard(card(id), null, null);
+            }
             case "selectPlayer" -> c.selectPlayer(player(id), null);
+            case "selectStack" -> c.selectStackItem(stackItem(id));
             case "useMana" -> c.useMana((byte) (int) color);
             case "alphaStrike" -> c.alphaStrike();
             case "undo" -> c.undoLastAction();

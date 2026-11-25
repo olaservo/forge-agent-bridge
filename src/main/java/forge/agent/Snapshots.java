@@ -359,7 +359,8 @@ final class Snapshots {
 
     /**
      * What the current prompt accepts: cards, including ones in zones the state does not list (a library
-     * search), and players. "chosen" is what is picked so far, or the attacker being blocked.
+     * search), players, and spells and abilities on the stack. "chosen" is what is picked so far, or the
+     * attacker being blocked.
      */
     private static void putSelection(final Map<String, Object> m, final Selection sel) {
         final List<Map<String, Object>> offered = new ArrayList<>();
@@ -369,6 +370,19 @@ final class Snapshots {
             }
         }
         final List<Map<String, Object>> targetPlayers = entities(sel.targets(), true);
+        // A counterspell's targets. The ids are those of the stack entries, which "stack" lists too.
+        final List<Map<String, Object>> targetStack = new ArrayList<>();
+        for (final TrackableObject o : sel.targets()) {
+            if (o instanceof StackItemView) {
+                final StackItemView si = (StackItemView) o;
+                final Map<String, Object> tm = new LinkedHashMap<>();
+                tm.put("id", si.getId());
+                tm.put("source", si.getSourceCard() == null ? null : si.getSourceCard().getName());
+                tm.put("by", si.getActivatingPlayer() == null ? null : si.getActivatingPlayer().getName());
+                tm.put("text", si.getText());
+                targetStack.add(tm);
+            }
+        }
         final List<Map<String, Object>> chosen = entities(sel.chosen(), false);
         // The host's hint at what can act now: cards that can be played, attack, block or pay.
         final List<Map<String, Object>> actionable = new ArrayList<>();
@@ -384,29 +398,40 @@ final class Snapshots {
         if (!actionable.isEmpty()) {
             m.put("actionable", actionable);
         }
-        if (!offered.isEmpty() || !targetPlayers.isEmpty() || !chosen.isEmpty()) {
+        if (!offered.isEmpty() || !targetPlayers.isEmpty() || !targetStack.isEmpty() || !chosen.isEmpty()) {
             final Map<String, Object> sm = new LinkedHashMap<>();
             sm.put("min", sel.min());
             sm.put("max", sel.max());
             sm.put("cards", offered);
             sm.put("players", targetPlayers);
+            if (!targetStack.isEmpty()) {
+                sm.put("stack", targetStack);
+            }
             sm.put("chosen", chosen);
             m.put("selection", sm);
         }
     }
 
-    /** Players and cards among a selection's objects, as id, name and type. Stack items are left out. */
+    /** A selection's objects as id, name and type: players, cards and stack entries, or players alone. A stack entry has its source's name. */
     private static List<Map<String, Object>> entities(final List<TrackableObject> objects, final boolean playersOnly) {
         final List<Map<String, Object>> out = new ArrayList<>();
         for (final TrackableObject o : objects) {
             final boolean player = o instanceof PlayerView;
-            if (!player && (playersOnly || !(o instanceof CardView))) {
+            final boolean stack = o instanceof StackItemView;
+            if (!player && (playersOnly || !(o instanceof CardView || stack))) {
                 continue;
             }
             final Map<String, Object> em = new LinkedHashMap<>();
-            em.put("type", player ? "player" : "card");
+            em.put("type", player ? "player" : stack ? "stack" : "card");
             em.put("id", o.getId());
-            em.put("name", player ? ((PlayerView) o).getName() : ((CardView) o).getName());
+            if (player) {
+                em.put("name", ((PlayerView) o).getName());
+            } else if (stack) {
+                final CardView source = ((StackItemView) o).getSourceCard();
+                em.put("name", source == null ? ((StackItemView) o).getText() : source.getName());
+            } else {
+                em.put("name", ((CardView) o).getName());
+            }
             out.add(em);
         }
         return out;
