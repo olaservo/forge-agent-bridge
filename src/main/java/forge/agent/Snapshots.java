@@ -16,6 +16,7 @@ import forge.game.GameView;
 import forge.game.card.CardView;
 import forge.game.card.CardView.CardStateView;
 import forge.game.combat.CombatView;
+import forge.game.phase.PhaseType;
 import forge.game.player.PlayerView;
 import forge.game.spellability.StackItemView;
 import forge.game.zone.ZoneType;
@@ -327,7 +328,7 @@ final class Snapshots {
         m.put("stack", stack);
         final CombatView combat = gv.getCombat();
         if (combat != null) {
-            m.put("combat", combat(combat));
+            m.put("combat", combat(gui, gv, combat));
         }
         final Selection sel = gui.getSelection();
         if (sel != null) {
@@ -336,22 +337,43 @@ final class Snapshots {
         return m;
     }
 
-    private static List<Map<String, Object>> combat(final CombatView combat) {
+    /**
+     * {@code blocked} is true once the block is final. While it is false, {@code blocksFinal} tells an unblocked
+     * attacker (true) from one whose defender has not finished declaring blockers (false).
+     */
+    private static List<Map<String, Object>> combat(final AgentGuiGame gui, final GameView gv, final CombatView combat) {
         final List<Map<String, Object>> attacks = new ArrayList<>();
+        final PhaseType phase = gv.getPhase();
+        final boolean afterBlocks = phase == PhaseType.COMBAT_FIRST_STRIKE_DAMAGE || phase == PhaseType.COMBAT_DAMAGE
+                || phase == PhaseType.COMBAT_END;
+        // The host marks every attacker blocked or unblocked in one step, so one final block means all are final.
+        boolean anyBlocked = false;
+        for (final CardView a : combat.getAttackers()) {
+            final FCollection<CardView> declared = combat.getBlockers(a);
+            anyBlocked |= declared != null && !declared.isEmpty();
+        }
         for (final CardView a : combat.getAttackers()) {
             final Map<String, Object> am = new LinkedHashMap<>();
+            final GameEntityView defender = combat.getDefender(a);
             am.put("attacker", a.getName());
             am.put("attackerId", a.getId());
-            am.put("defender", combat.getDefender(a) == null ? null : combat.getDefender(a).getName());
+            am.put("defender", defender == null ? null : defender.getName());
             // The host lists blockers as declared only once the block is final. Until then they are planned.
             final FCollection<CardView> declared = combat.getBlockers(a);
             final FCollection<CardView> planned = combat.getPlannedBlockers(a);
+            final boolean blocked = declared != null && !declared.isEmpty();
             final List<String> blockers = new ArrayList<>();
-            for (final CardView b : declared != null && !declared.isEmpty() ? declared : planned == null ? List.<CardView>of() : planned) {
+            for (final CardView b : blocked ? declared : planned == null ? List.<CardView>of() : planned) {
                 blockers.add(b.getName() + "#" + b.getId());
             }
             am.put("blockers", blockers);
-            am.put("blocked", declared != null && !declared.isEmpty());
+            am.put("blocked", blocked);
+            // A planeswalker's blocks are declared by its controller.
+            final PlayerView defending = defender instanceof PlayerView ? (PlayerView) defender
+                    : defender instanceof CardView ? ((CardView) defender).getController() : null;
+            final boolean declaredDone = anyBlocked || (defending != null && gui.blocksDeclared(gv.getTurn(), defending.getId()));
+            // A planned blocker the host has not listed as declared is not final, whatever else has arrived.
+            am.put("blocksFinal", blocked || afterBlocks || (declaredDone && blockers.isEmpty()));
             attacks.add(am);
         }
         return attacks;
