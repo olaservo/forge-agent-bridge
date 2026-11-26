@@ -100,6 +100,11 @@ final class RiggedMatch {
         return new RiggedMatch((Deck) null);
     }
 
+    /** The same, with this deck for the host AI. */
+    static RiggedMatch inLobby(final Deck hostDeck) throws Exception {
+        return new RiggedMatch(hostDeck);
+    }
+
     private RiggedMatch(final Deck hostDeck) throws Exception {
         bridge.start(0);
         http = new BridgeHttp(bridge.port());
@@ -289,6 +294,10 @@ final class RiggedMatch {
 
     /** True while the host's game thread is parked on the agent's seat, so the host's game is not moving. */
     boolean hostWaitsOnSeat() {
+        return hostWaitsOnSeat(lobby);
+    }
+
+    static boolean hostWaitsOnSeat(final ServerGameLobby lobby) {
         final HostedMatch hosted = lobby.getHostedMatch();
         if (hosted == null || hosted.getGame() == null || hosted.getGame().isGameOver()) {
             return false;
@@ -326,6 +335,10 @@ final class RiggedMatch {
     // ---- the host's own game ----
 
     private Player hostPlayer(final String name) {
+        return hostPlayer(lobby, name);
+    }
+
+    private static Player hostPlayer(final ServerGameLobby lobby, final String name) {
         for (final Player p : lobby.getHostedMatch().getGame().getPlayers()) {
             if (name.equals(p.getName())) {
                 return p;
@@ -363,7 +376,11 @@ final class RiggedMatch {
      * game. Only while {@link #hostWaitsOnSeat} is true: the host's game does not move then.
      */
     void hostPuts(final String player, final String name) {
-        final Player p = hostPlayer(player);
+        hostPuts(lobby, player, name);
+    }
+
+    static void hostPuts(final ServerGameLobby lobby, final String player, final String name) {
+        final Player p = hostPlayer(lobby, player);
         for (final ZoneType zone : List.of(ZoneType.Library, ZoneType.Hand)) {
             for (final Card c : p.getCardsIn(zone)) {
                 if (name.equals(c.getName())) {
@@ -373,6 +390,18 @@ final class RiggedMatch {
             }
         }
         throw new IllegalStateException("no " + name + " in the library or hand of " + player);
+    }
+
+    /** Moves a card of that name from a player's library to its hand, in the host's game. Only while the host waits on the seat. */
+    static void hostDeals(final ServerGameLobby lobby, final String player, final String name) {
+        final Player p = hostPlayer(lobby, player);
+        for (final Card c : p.getCardsIn(ZoneType.Library)) {
+            if (name.equals(c.getName())) {
+                p.getGame().getAction().moveToHand(c, null, AbilityKey.newMap());
+                return;
+            }
+        }
+        throw new IllegalStateException("no " + name + " in the library of " + player);
     }
 
     int hostLife(final String player) {

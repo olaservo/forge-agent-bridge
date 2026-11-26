@@ -51,7 +51,8 @@ public class AgentRiggedGameTest {
 
     @Test(timeOut = 300_000)
     public void agentSetsItsAvatarAndSearchesItsLibrary() throws Exception {
-        match = RiggedMatch.inLobby();
+        // A host deck with no card that makes the seat search: a random one can, on the host's turn.
+        match = RiggedMatch.inLobby(RiggedMatch.deck("Host bears", "20 Forest", "20 Grizzly Bears"));
         final BridgeHttp http = match.http;
 
         // The bridge and the host share one preferences file, so both seats start on the same avatar.
@@ -129,10 +130,15 @@ public class AgentRiggedGameTest {
         }
 
         final int land = fetched;
-        AgentGameTest.waitFor("the chosen basic is on the battlefield", 20_000, () -> card(RiggedMatch.me(http.get("/game")), "battlefield", land) != null);
-        final JsonObject after = http.get("/game");
+        // The land is read in the state that first shows it, before a later untap step.
+        final JsonObject[] arrived = new JsonObject[1];
+        AgentGameTest.waitFor("the chosen basic is on the battlefield", 20_000, () -> {
+            arrived[0] = http.get("/game");
+            return card(RiggedMatch.me(arrived[0]), "battlefield", land) != null;
+        });
+        final JsonObject after = arrived[0];
         assertTrue(card(RiggedMatch.me(after), "battlefield", land).get("tapped").getAsBoolean(), "it entered tapped: " + after);
-        assertFalse(after.has("selection"), "the search is over: " + after);
+        AgentGameTest.waitFor("the search is over", 20_000, () -> !http.get("/game").has("selection"));
         System.out.println("[AgentRiggedGameTest] searched on turn " + after.get("turn") + ", decisions " + decisionKinds);
         match.finish();
     }

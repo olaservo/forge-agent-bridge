@@ -30,7 +30,8 @@ import forge.interfaces.IUpdateable;
  * the other seat, driven over its HTTP API like the MCP server does. The agent's deck is lands
  * plus Goblin Bushwhacker (kicker: an optional-cost dialog when cast) and Civic Wayfinder (an
  * enters trigger with a yes/no prompt, then a library-search dialog), so the pending-decision
- * path is exercised. Policy: answer a decision with its first option; on our main phase try each
+ * path is exercised. On the seat's first main phase the host puts two Mountains into play for it and
+ * a Bushwhacker into its hand, so one kicker dialog comes whatever the draw. Policy: answer a decision with its first option; on our main phase try each
  * hand card once (lands get played, spells get cast with Auto payment); otherwise press OK; when
  * OK is disabled, Cancel if allowed, else select the first card the prompt offers, or the first card
  * in hand (discard to hand size).
@@ -121,6 +122,7 @@ public class AgentGameTest {
         int actions = 0;
         int decisions = 0;
         int casts = 0;
+        boolean stocked = false;
         long lastCardSelect = 0;
         String lastAutoPrompt = null;
         final Set<String> decisionKinds = new LinkedHashSet<>();
@@ -156,6 +158,15 @@ public class AgentGameTest {
             final boolean myTurn = isMe(g, g.get("activePlayer"));
             final String phase = g.get("phase").isJsonNull() ? "" : g.get("phase").getAsString();
 
+            if (!stocked && (pd == null || pd.isJsonNull()) && okEnabled && myTurn && phase.startsWith("MAIN") && g.getAsJsonArray("stack").isEmpty()
+                    && RiggedMatch.hostWaitsOnSeat(lobby)) {
+                // The kicker dialog does not wait on the draw: the host gives the seat two Mountains and a Bushwhacker.
+                stocked = true;
+                RiggedMatch.hostPuts(lobby, "AgentBot", "Mountain");
+                RiggedMatch.hostPuts(lobby, "AgentBot", "Mountain");
+                RiggedMatch.hostDeals(lobby, "AgentBot", "Goblin Bushwhacker");
+                continue;
+            }
             if (pd != null && !pd.isJsonNull()) {
                 final JsonObject d = pd.getAsJsonObject();
                 http.record("GET /game#decision", g);
